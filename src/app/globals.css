@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/*
+ * Institutional, medical, mobile-first. Slate/ink neutrals with a single
+ * clinical blue accent; status colours are reserved for clinical state.
+ */
+@theme {
+  --color-ink-50: #f6f7f9;
+  --color-ink-100: #eceef2;
+  --color-ink-200: #d7dbe3;
+  --color-ink-300: #b3bac8;
+  --color-ink-400: #8892a5;
+  --color-ink-500: #667085;
+  --color-ink-600: #4d5768;
+  --color-ink-700: #3a4354;
+  --color-ink-800: #232c3b;
+  --color-ink-900: #141b26;
+
+  --color-clinical-50: #eef4fb;
+  --color-clinical-100: #d8e6f6;
+  --color-clinical-200: #b0cbec;
+  --color-clinical-500: #2f6db0;
+  --color-clinical-600: #255a94;
+  --color-clinical-700: #1d4776;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-ink-50);
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+  /* Room for the fixed bottom navigation on mobile. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Tap targets stay comfortable on a phone (spec §47). */
+button,
+[role="button"],
+a.tap {
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

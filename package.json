@@ -1,0 +1,41 @@
+{
+  "name": "step3-teaching-hospital",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Case-centric Step 3 study application disguised as a fictional teaching hospital.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx src/db/scripts/migrate.ts",
+    "db:seed": "tsx src/db/scripts/seed.ts",
+    "db:reset-demo": "tsx src/db/scripts/resetDemo.ts",
+    "db:delete-demo": "tsx src/db/scripts/deleteDemo.ts",
+    "db:nuke": "tsx src/db/scripts/nuke.ts",
+    "setup": "npm run db:migrate && npm run db:seed",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "drizzle-kit": "^0.31.10",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
+  }
+}
