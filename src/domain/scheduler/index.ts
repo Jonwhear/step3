@@ -11,10 +11,11 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import { INPATIENT_UNIT } from "@/config/hospital";
 import { SCHEDULER_CONFIG } from "@/config/scheduler";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
-import { DEMO_PATIENT_NAMES, DEMO_ROOM_MAX, DEMO_ROOM_MIN } from "@/content/demo/patientNames";
+import { DEMO_PATIENT_NAMES } from "@/content/demo/patientNames";
 import type { EntryMode } from "@/domain/constants";
 import { getCaseConceptIds, listCases } from "@/domain/cases";
 import { getRecentLectureConceptIds, markLectureScheduled, selectDailyLecture } from "@/domain/lectures";
@@ -26,6 +27,13 @@ import {
   listAllPatients,
 } from "@/domain/patients";
 import { getCurrentRotation, getProfile, USER_ID } from "@/domain/profile";
+import {
+  countAvailableInpatientRooms,
+  findAvailableRoom,
+  reconcilePatientRooms,
+  seedHospitalRooms,
+} from "@/domain/rooms";
+import { getPreferences, resolveSchedulerTuning } from "@/domain/settings";
 import { nowIso, todayIso, type IsoDate } from "@/lib/date";
 import { seededUnit } from "@/lib/seededRandom";
 import { chooseEntryMode, type EntryModeDecision } from "./entryMode";
@@ -42,6 +50,7 @@ const FIRST_RUN_PATIENT_COUNT = 3;
 export * from "./pacing";
 export * from "./scoring";
 export * from "./entryMode";
+export * from "./bootstrap";
 
 export interface AssignedPatientDebug {
   caseId: string;
@@ -70,6 +79,62 @@ export interface SchedulerDebug {
   weakConceptCount: number;
   recentLectureConceptCount: number;
   notes: string[];
+  /* --- capacity & eligibility diagnostics (spec §36) --------------------- */
+  totalCaseCount: number;
+  eligibleCaseCount: number;
+  excludedCaseCount: number;
+  availableBeds: number;
+  censusCap: number;
+  physicalRoomCap: number;
+  /**
+   * Set whenever zero patients were assigned. The whole point of §36 is that
+   * "no patients today" is never unexplained, so this is populated even when
+   * the outcome is perfectly reasonable.
+   */
+  blockedReason: string | null;
+}
+
+/**
+ * Names the single binding constraint when nothing was assigned. Ordered from
+ * most specific to most general so the answer is actionable rather than "some
+ * combination of things".
+ */
+function explainNoAssignment(input: {
+  assignedCount: number;
+  requested: number;
+  slots: number;
+  freeRooms: number;
+  eligibleCount: number;
+  totalCases: number;
+  dailyTarget: number;
+  remainingPatients: number;
+  censusCap: number;
+  activePanelSize: number;
+}): string | null {
+  if (input.assignedCount > 0) return null;
+
+  if (input.totalCases === 0) {
+    return "The content library contains no cases. Seed the demo library or import a content pack.";
+  }
+  if (input.eligibleCount === 0) {
+    return "Every published case is already on your service. Discharge someone, or add more content.";
+  }
+  if (input.freeRooms === 0) {
+    return `Every inpatient room on ${INPATIENT_UNIT} is occupied.`;
+  }
+  if (input.slots === 0) {
+    return `Your census cap of ${input.censusCap} is reached (${input.activePanelSize} active).`;
+  }
+  if (input.remainingPatients === 0) {
+    return "You have reached your target patient count for this study plan.";
+  }
+  if (input.dailyTarget === 0) {
+    return "Today's pacing target is zero — you are ahead of your study plan.";
+  }
+  if (input.requested === 0) {
+    return "Capacity and pacing combined to request zero new patients today.";
+  }
+  return "No candidate case scored high enough to be assigned.";
 }
 
 export interface SchedulerRunResult {
@@ -100,16 +165,16 @@ export function getSchedulerDebug(db: Db, date: IsoDate = todayIso()): Scheduler
 }
 
 /**
- * Deterministically picks a name and room for a new demo patient, avoiding
- * collisions with anyone currently on the panel.
+ * Deterministically picks a name for a new demo patient, avoiding collisions
+ * with anyone currently on the panel. The *room* is no longer chosen here:
+ * physical rooms come from the hospital map (spec §29), which is what makes
+ * double-booking impossible.
  */
-function assignIdentity(
-  db: Db,
+function assignPatientName(
   caseId: string,
   today: IsoDate,
   usedNames: Set<string>,
-  usedRooms: Set<string>,
-): { patientName: string; roomNumber: string } {
+): string {
   const base = seededUnit(USER_ID, today, caseId, "identity");
 
   let patientName = DEMO_PATIENT_NAMES[0] ?? "Patient";
@@ -122,19 +187,7 @@ function assignIdentity(
     }
   }
   usedNames.add(patientName);
-
-  const span = DEMO_ROOM_MAX - DEMO_ROOM_MIN + 1;
-  let roomNumber = String(DEMO_ROOM_MIN);
-  for (let i = 0; i < span; i += 1) {
-    const candidate = String(DEMO_ROOM_MIN + ((Math.floor(base * span) + i) % span));
-    if (!usedRooms.has(candidate)) {
-      roomNumber = candidate;
-      break;
-    }
-  }
-  usedRooms.add(roomNumber);
-
-  return { patientName, roomNumber };
+  return patientName;
 }
 
 /**
@@ -170,25 +223,59 @@ export function runDailyScheduler(
 
   const rotation = getCurrentRotation(db, today);
 
+  // The ward has to exist before anyone can be put in it, and a V1 panel has
+  // no room ids at all — both are cheap and idempotent to settle here.
+  seedHospitalRooms(db);
+  reconcilePatientRooms(db);
+
+  const tuning = resolveSchedulerTuning(getPreferences(db).scheduler);
+
   /* --- 1. Existing panel comes first ------------------------------------- */
   const panel = listActivePanel(db);
   const activePanelSize = panel.length;
-  const slots = availablePanelSlots(activePanelSize);
+  const freeRooms = countAvailableInpatientRooms(db);
+  // Two independent ceilings: the learner's census preference and the physical
+  // ward. Whichever binds first is the one to report (spec §55).
+  const slots = Math.min(
+    availablePanelSlots(activePanelSize, tuning.effectiveCensusCap),
+    freeRooms,
+  );
   if (slots === 0) {
     notes.push(
-      `Panel is at capacity (${activePanelSize}/${SCHEDULER_CONFIG.MAX_ACTIVE_PANEL_SIZE}); no new patients today.`,
+      freeRooms === 0
+        ? `Every inpatient room on ${INPATIENT_UNIT} is occupied; no new patients today.`
+        : `Census is at your configured cap (${activePanelSize}/${tuning.effectiveCensusCap}); no new patients today.`,
     );
   }
 
   /* --- 2. Pacing ---------------------------------------------------------- */
   const allPatients = listAllPatients(db);
-  const pacing = calculateDailyPatientTarget({
+  const basePacing = calculateDailyPatientTarget({
     studyStartDate: profile.studyStartDate,
     step3Date: profile.step3Date,
     targetPatientCount: profile.targetPatientCount,
     patientsAssigned: allPatients.length,
     today,
   });
+
+  // Workload intensity scales the finished target rather than any single term,
+  // so "Light" stays light even when catch-up is also pushing.
+  const pacing: PacingResult = {
+    ...basePacing,
+    dailyTarget: Math.min(
+      Math.max(
+        basePacing.dailyTarget === 0 ? 0 : 1,
+        Math.round(basePacing.dailyTarget * tuning.workloadMultiplier),
+      ),
+      SCHEDULER_CONFIG.MAX_NEW_PATIENTS_PER_DAY,
+      basePacing.remainingPatients,
+    ),
+  };
+  if (tuning.workloadMultiplier !== 1) {
+    notes.push(
+      `Workload intensity adjusted today's target from ${basePacing.dailyTarget} to ${pacing.dailyTarget}.`,
+    );
+  }
 
   // First run: guarantee enough of a panel that the learner sees the whole
   // workflow immediately (spec §42) rather than a single handoff patient.
@@ -204,13 +291,16 @@ export function runDailyScheduler(
   }
   if (pacing.catchUpAdjustment > 0) {
     notes.push(
-      `Catch-up active: ${pacing.deficit.toFixed(1)} patient deficit spread over ${SCHEDULER_CONFIG.CATCHUP_SPREAD_DAYS} days.`,
+      `Catch-up active: ${pacing.deficit.toFixed(1)} patient deficit spread over ${tuning.catchUpSpreadDays} days.`,
     );
   }
 
   /* --- 3. Score candidates ------------------------------------------------ */
   const cases = listCases(db);
-  const candidates: CandidateCase[] = cases.map((c) => ({
+  // Only publishable content may reach a learner (spec §7): drafts, cases in
+  // review and archived cases are never scheduled.
+  const publishedCases = cases.filter((c) => c.status === "PUBLISHED");
+  const candidates: CandidateCase[] = publishedCases.map((c) => ({
     id: c.id,
     code: c.code,
     title: c.title,
@@ -249,8 +339,15 @@ export function runDailyScheduler(
     topicCaseCounts,
     recentLectureConceptIds,
     lastAssignedByCase,
+    rotationRelevanceWeight: tuning.rotationRelevanceWeight,
   });
 
+  const unpublishedCount = cases.length - publishedCases.length;
+  if (unpublishedCount > 0) {
+    notes.push(
+      `${unpublishedCount} case(s) excluded because they are not published (draft, review or archived).`,
+    );
+  }
   if (eligible.length < newPatientsRequested) {
     notes.push(
       `Only ${eligible.length} case(s) eligible today (cases already on service are excluded).`,
@@ -260,7 +357,7 @@ export function runDailyScheduler(
   /* --- 4. Assign ---------------------------------------------------------- */
   const masteryByConcept = new Map(listConceptStates(db).map((s) => [s.conceptId, s.masteryLevel]));
   const usedNames = new Set(panel.map((p) => p.patientName));
-  const usedRooms = new Set(panel.map((p) => p.roomNumber));
+  const reservedRooms = new Set<string>();
 
   const assigned: AssignedPatientDebug[] = [];
   const newPatientIds: string[] = [];
@@ -268,6 +365,13 @@ export function runDailyScheduler(
   for (const score of ranked.slice(0, newPatientsRequested)) {
     const candidate = eligible.find((c) => c.id === score.caseId);
     if (!candidate) continue;
+
+    const room = findAvailableRoom(db, "INPATIENT", reservedRooms);
+    if (!room) {
+      notes.push("Ran out of inpatient rooms partway through today's assignment.");
+      break;
+    }
+    reservedRooms.add(room.id);
 
     let decision: EntryModeDecision = chooseEntryMode({
       conceptMasteryLevels: candidate.conceptIds.map((id) => masteryByConcept.get(id) ?? 0),
@@ -286,11 +390,13 @@ export function runDailyScheduler(
       };
     }
 
-    const identity = assignIdentity(db, candidate.id, today, usedNames, usedRooms);
+    const patientName = assignPatientName(candidate.id, today, usedNames);
     const patientId = createPatientInstance(db, {
       caseId: candidate.id,
-      patientName: identity.patientName,
-      roomNumber: identity.roomNumber,
+      patientName,
+      roomNumber: room.roomNumber,
+      roomId: room.id,
+      locationType: "INPATIENT",
       entryMode: decision.entryMode,
       assignedDate: today,
     });
@@ -300,8 +406,8 @@ export function runDailyScheduler(
       caseId: candidate.id,
       code: candidate.code,
       title: candidate.title,
-      patientName: identity.patientName,
-      roomNumber: identity.roomNumber,
+      patientName,
+      roomNumber: room.roomNumber,
       entryMode: decision.entryMode,
       entryModeReason: decision.reason,
       score: score.total,
@@ -340,6 +446,24 @@ export function runDailyScheduler(
     weakConceptCount: weakConceptIds.size,
     recentLectureConceptCount: recentLectureConceptIds.size,
     notes,
+    totalCaseCount: cases.length,
+    eligibleCaseCount: eligible.length,
+    excludedCaseCount: cases.length - eligible.length,
+    availableBeds: freeRooms,
+    censusCap: tuning.effectiveCensusCap,
+    physicalRoomCap: tuning.physicalRoomCap,
+    blockedReason: explainNoAssignment({
+      assignedCount: assigned.length,
+      requested: newPatientsRequested,
+      slots,
+      freeRooms,
+      eligibleCount: eligible.length,
+      totalCases: cases.length,
+      dailyTarget: pacing.dailyTarget,
+      remainingPatients: pacing.remainingPatients,
+      censusCap: tuning.effectiveCensusCap,
+      activePanelSize,
+    }),
   };
 
   db.insert(t.schedulerRun)
@@ -398,6 +522,13 @@ function emptyDebug(db: Db, today: IsoDate): SchedulerDebug {
     weakConceptCount: 0,
     recentLectureConceptCount: 0,
     notes: [],
+    totalCaseCount: 0,
+    eligibleCaseCount: 0,
+    excludedCaseCount: 0,
+    availableBeds: 0,
+    censusCap: 0,
+    physicalRoomCap: 0,
+    blockedReason: null,
   };
 }
 

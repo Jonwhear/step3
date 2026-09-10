@@ -22,6 +22,7 @@ import {
   gradePromptResponse,
   resolveAction,
 } from "@/domain/cases";
+import { describeEvidence } from "@/domain/content/provenance";
 import { completeLecture, getLectureConceptIds, startLecture } from "@/domain/lectures";
 import { introduceConcepts, updateConceptMastery } from "@/domain/mastery";
 import {
@@ -45,6 +46,8 @@ import {
   updateRotation,
   upsertProfile,
 } from "@/domain/profile";
+import { bootstrapNewUserService } from "@/domain/scheduler";
+import { resetPreferences, setPreference } from "@/domain/settings";
 import { db } from "@/server/db";
 import { todayIso } from "@/lib/date";
 
@@ -156,7 +159,11 @@ export async function deleteRotationAction(formData: FormData): Promise<void> {
 }
 
 export async function finishOnboardingAction(): Promise<void> {
-  setSetting(db(), SETTING_KEYS.onboarded, "true");
+  const database = db();
+  setSetting(database, SETTING_KEYS.onboarded, "true");
+  // Hand the learner a service immediately rather than an empty hospital that
+  // fills in tomorrow (spec §35). Runs once; the marker prevents repeats.
+  bootstrapNewUserService(database, { today: todayIso() });
   revalidateAll();
   redirect("/");
 }
@@ -166,7 +173,6 @@ export async function finishOnboardingAction(): Promise<void> {
 export async function saveAudioPreferenceAction(prefs: {
   rate?: number;
   voiceUri?: string | null;
-  autoRead?: boolean;
 }): Promise<void> {
   const database = db();
   if (typeof prefs.rate === "number") {
@@ -175,14 +181,19 @@ export async function saveAudioPreferenceAction(prefs: {
   if (prefs.voiceUri !== undefined) {
     setSetting(database, SETTING_KEYS.ttsVoice, prefs.voiceUri ?? "");
   }
-  if (typeof prefs.autoRead === "boolean") {
-    setSetting(database, SETTING_KEYS.autoRead, String(prefs.autoRead));
-  }
 }
 
-export async function toggleAutoReadAction(formData: FormData): Promise<void> {
-  const next = formData.get("autoRead") === "on";
-  setSetting(db(), SETTING_KEYS.autoRead, String(next));
+/** Appearance, lab display and scheduler preferences all share this action. */
+export async function savePreferenceAction(formData: FormData): Promise<void> {
+  const key = String(formData.get("key") ?? "");
+  const value = String(formData.get("value") ?? "");
+  if (!key.trim()) return;
+  setPreference(db(), key, value);
+  revalidateAll();
+}
+
+export async function resetPreferencesAction(): Promise<void> {
+  resetPreferences(db());
   revalidateAll();
 }
 
@@ -235,6 +246,12 @@ export interface PromptResultState {
   correctLabel?: string;
   masteryLabel?: string;
   error?: string;
+  /* Layered explanation (spec §24). Any of these may be blank. */
+  whyCorrect?: string;
+  whyOthersWrong?: string;
+  caseEvidence?: string;
+  detailedExplanation?: string;
+  sourceReferences?: string[];
 }
 
 /**
@@ -326,6 +343,11 @@ export async function submitPromptAction(
     answerLabel: grade.answerLabel,
     correctLabel: grade.correctLabel,
     masteryLabel,
+    whyCorrect: prompt.whyCorrect || undefined,
+    whyOthersWrong: prompt.whyOthersWrong || undefined,
+    caseEvidence: prompt.caseEvidence || undefined,
+    detailedExplanation: prompt.detailedExplanation || undefined,
+    sourceReferences: describeEvidence(database, "CASE_PROMPT", prompt.id),
   };
 }
 

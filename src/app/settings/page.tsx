@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { APP_CONFIG } from "@/config/app";
-import { toggleAutoReadAction } from "@/app/actions";
+import { INPATIENT_ROOM_COUNT, INPATIENT_UNIT } from "@/config/hospital";
+import { resetPreferencesAction } from "@/app/actions";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
 import { Card, SectionHeading } from "@/components/ui";
 import { OnboardingForm } from "@/app/onboarding/OnboardingForm";
 import { RotationEditor } from "@/app/onboarding/RotationEditor";
+import { SegmentedPreference, TogglePreference } from "./PreferenceControls";
+import { getProfile, listRotations } from "@/domain/profile";
 import {
-  getAudioPreferences,
-  getProfile,
-  listRotations,
-} from "@/domain/profile";
+  getPreferences,
+  resolveSchedulerTuning,
+  SETTINGS_KEYS,
+} from "@/domain/settings";
 import { db } from "@/server/db";
 import { addDays, todayIso } from "@/lib/date";
 
@@ -20,7 +23,13 @@ export default function SettingsPage() {
   const database = db();
   const profile = getProfile(database);
   const rotations = listRotations(database);
-  const audio = getAudioPreferences(database);
+  const prefs = getPreferences(database);
+  const tuning = resolveSchedulerTuning(prefs.scheduler);
+
+  const censusOptions = Array.from({ length: 6 }, (_, i) => ({
+    value: String(i + 5),
+    label: String(i + 5),
+  }));
 
   return (
     <>
@@ -28,65 +37,198 @@ export default function SettingsPage() {
       <PageShell>
         <h1 className="mb-4 text-lg font-semibold text-ink-900">Settings</h1>
 
-        <SectionHeading>Audio</SectionHeading>
+        {/* --- profile & study plan --------------------------------------- */}
+        <SectionHeading>Profile &amp; study plan</SectionHeading>
         <Card className="p-4">
-          <form action={toggleAutoReadAction}>
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                name="autoRead"
-                defaultChecked={audio.autoRead}
-                className="mt-1 h-5 w-5 rounded border-ink-300"
-              />
-              <span>
-                <span className="block text-sm font-medium text-ink-800">
-                  Auto-read clinical content aloud
-                </span>
-                <span className="mt-0.5 block text-xs text-ink-500">
-                  When enabled, opening handoff starts reading automatically and
-                  conferences advance section by section. Speed and voice are
-                  chosen in the player and are remembered.
-                </span>
-              </span>
-            </label>
-            <button
-              type="submit"
-              className="mt-3 h-11 w-full rounded-lg border border-ink-200 text-sm font-medium text-ink-700"
-            >
-              Save audio preference
-            </button>
-          </form>
-          <p className="mt-3 border-t border-ink-100 pt-3 text-xs text-ink-400">
-            Speech uses the browser&apos;s built-in synthesis. Voice availability
-            and quality vary between browsers, and some have no voices at all —
-            in that case all content remains readable on screen.
+          <p className="mb-3 text-xs text-ink-500">
+            Changing your Step 3 date or target recalculates pacing from the next
+            scheduler run. Your progress is never reset.
           </p>
+          <OnboardingForm profile={profile} defaultStep3Date={addDays(todayIso(), 120)} />
         </Card>
-
-        <section className="mt-6">
-          <SectionHeading>Profile</SectionHeading>
-          <Card className="p-4">
-            <OnboardingForm profile={profile} defaultStep3Date={addDays(todayIso(), 120)} />
-          </Card>
-        </section>
 
         <section className="mt-6">
           <SectionHeading>Rotation schedule</SectionHeading>
           <RotationEditor rotations={rotations} />
         </section>
 
+        {/* --- appearance --------------------------------------------------- */}
         <section className="mt-6">
-          <SectionHeading>Developer</SectionHeading>
+          <SectionHeading>Appearance</SectionHeading>
+          <Card className="space-y-5 p-4">
+            <SegmentedPreference
+              label="Theme"
+              hint="System follows your device setting."
+              settingKey={SETTINGS_KEYS.theme}
+              value={prefs.appearance.theme}
+              options={[
+                { value: "system", label: "System" },
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+              ]}
+            />
+            <SegmentedPreference
+              label="Font size"
+              settingKey={SETTINGS_KEYS.fontSize}
+              value={prefs.appearance.fontSize}
+              options={[
+                { value: "compact", label: "Compact" },
+                { value: "standard", label: "Standard" },
+                { value: "large", label: "Large" },
+              ]}
+            />
+            <SegmentedPreference
+              label="Density"
+              hint="Compact tightens spacing between chart blocks."
+              settingKey={SETTINGS_KEYS.density}
+              value={prefs.appearance.density}
+              options={[
+                { value: "comfortable", label: "Comfortable" },
+                { value: "compact", label: "Compact" },
+              ]}
+            />
+            <SegmentedPreference
+              label="Accent colour"
+              settingKey={SETTINGS_KEYS.accent}
+              value={prefs.appearance.accent}
+              options={[
+                { value: "clinical", label: "Clinical blue" },
+                { value: "teal", label: "Teal" },
+                { value: "indigo", label: "Indigo" },
+                { value: "slate", label: "Slate" },
+              ]}
+            />
+          </Card>
+        </section>
+
+        {/* --- labs --------------------------------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Laboratory display</SectionHeading>
+          <Card className="p-4">
+            <TogglePreference
+              label="Show laboratory reference ranges"
+              hint="Mirrors how ranges are presented on the exam. Abnormal flags stay visible either way."
+              settingKey={SETTINGS_KEYS.showLabReferenceRanges}
+              enabled={prefs.labs.showReferenceRanges}
+            />
+          </Card>
+        </section>
+
+        {/* --- audio -------------------------------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Audio</SectionHeading>
           <Card className="p-4">
             <p className="text-sm text-ink-700">
-              Scheduler inspector and demo data management.
+              Audio never starts on its own. Every screen opens silent, and
+              playback begins only when you press Play. Speed and voice are
+              chosen in the player itself and are remembered between sessions.
             </p>
-            <Link
+            <p className="mt-3 border-t border-ink-100 pt-3 text-xs text-ink-400">
+              Speech uses the browser&apos;s built-in synthesis. Voice
+              availability and quality vary between browsers, and some have no
+              voices at all — in that case all content remains readable on
+              screen.
+            </p>
+          </Card>
+        </section>
+
+        {/* --- scheduler ---------------------------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Scheduler</SectionHeading>
+          <Card className="space-y-5 p-4">
+            <SegmentedPreference
+              label="Daily workload intensity"
+              hint="Scales how many new patients arrive each day."
+              settingKey={SETTINGS_KEYS.workloadIntensity}
+              value={prefs.scheduler.workloadIntensity}
+              options={[
+                { value: "light", label: "Light" },
+                { value: "standard", label: "Standard" },
+                { value: "high", label: "High" },
+              ]}
+            />
+            <SegmentedPreference
+              label="Maximum active census"
+              hint={`${INPATIENT_UNIT} physically holds ${INPATIENT_ROOM_COUNT} patients; the lower of the two applies.`}
+              settingKey={SETTINGS_KEYS.maxCensus}
+              value={String(prefs.scheduler.maxCensus)}
+              options={censusOptions}
+            />
+            <SegmentedPreference
+              label="Catch-up intensity"
+              hint="How quickly missed days are repaid."
+              settingKey={SETTINGS_KEYS.catchUpIntensity}
+              value={prefs.scheduler.catchUpIntensity}
+              options={[
+                { value: "gentle", label: "Gentle" },
+                { value: "standard", label: "Standard" },
+                { value: "aggressive", label: "Aggressive" },
+              ]}
+            />
+            <SegmentedPreference
+              label="Current-rotation emphasis"
+              hint="How strongly today's rotation pulls matching cases forward."
+              settingKey={SETTINGS_KEYS.rotationEmphasis}
+              value={prefs.scheduler.rotationEmphasis}
+              options={[
+                { value: "low", label: "Low" },
+                { value: "standard", label: "Standard" },
+                { value: "high", label: "High" },
+              ]}
+            />
+
+            <div className="border-t border-ink-100 pt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+                Resolved values
+              </p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <dt className="text-ink-500">Effective census cap</dt>
+                <dd className="tabular-nums text-ink-800">{tuning.effectiveCensusCap}</dd>
+                <dt className="text-ink-500">Workload multiplier</dt>
+                <dd className="tabular-nums text-ink-800">
+                  {tuning.workloadMultiplier.toFixed(2)}×
+                </dd>
+                <dt className="text-ink-500">Catch-up spread</dt>
+                <dd className="tabular-nums text-ink-800">
+                  {tuning.catchUpSpreadDays} days, max +{tuning.catchUpCap}/day
+                </dd>
+                <dt className="text-ink-500">Rotation weight</dt>
+                <dd className="tabular-nums text-ink-800">
+                  {tuning.rotationRelevanceWeight.toFixed(2)}
+                </dd>
+              </dl>
+            </div>
+
+            <form action={resetPreferencesAction}>
+              <button
+                type="submit"
+                className="h-11 w-full rounded-lg border border-ink-200 text-sm font-medium text-ink-700"
+              >
+                Reset all preferences to defaults
+              </button>
+            </form>
+          </Card>
+        </section>
+
+        {/* --- advanced ----------------------------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Advanced</SectionHeading>
+          <Card className="divide-y divide-ink-100">
+            <SettingsLink
+              href="/settings/content"
+              title="Content library"
+              body="Browse, validate, edit and publish cases. Manage sources, learning points and content packs."
+            />
+            <SettingsLink
+              href="/settings/content/coverage"
+              title="Content coverage audit"
+              body="Where each source learning point is tested, and what is still unmapped."
+            />
+            <SettingsLink
               href="/settings/developer"
-              className="mt-3 inline-flex h-11 items-center rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700"
-            >
-              Open developer tools ›
-            </Link>
+              title="Developer tools"
+              body="Scheduler inspector, room state, audio state and demo data management."
+            />
           </Card>
         </section>
 
@@ -106,5 +248,27 @@ export default function SettingsPage() {
         </section>
       </PageShell>
     </>
+  );
+}
+
+function SettingsLink({
+  href,
+  title,
+  body,
+}: {
+  href: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <Link href={href} className="tap block px-4 py-3">
+      <p className="text-sm font-medium text-ink-800">
+        {title}
+        <span aria-hidden="true" className="ml-1.5 text-ink-300">
+          ›
+        </span>
+      </p>
+      <p className="mt-0.5 text-xs text-ink-500">{body}</p>
+    </Link>
   );
 }

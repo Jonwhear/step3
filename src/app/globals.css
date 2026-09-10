@@ -3,6 +3,12 @@
 /*
  * Institutional, medical, mobile-first. Slate/ink neutrals with a single
  * clinical blue accent; status colours are reserved for clinical state.
+ *
+ * Theming (spec §50): the ink/clinical scales are *semantic*, not literal
+ * lightness values. In dark mode the ink scale is inverted in place, so a
+ * component written as `text-ink-700 bg-surface` is correct in both themes
+ * without carrying a `dark:` variant for every rule. Only genuinely
+ * theme-specific touches need `dark:`.
  */
 @theme {
   --color-ink-50: #f6f7f9;
@@ -23,19 +29,186 @@
   --color-clinical-600: #255a94;
   --color-clinical-700: #1d4776;
 
+  /* Raised surfaces (cards, sticky headers) against the page ground. */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f6f7f9;
+  --color-canvas: #f6f7f9;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 }
 
 :root {
   color-scheme: light;
+  /* Set by the appearance settings; consumed by the density/size rules below. */
+  --app-font-scale: 1;
+  --app-density-gap: 1;
+}
+
+/*
+ * Dark palette. `[data-theme="dark"]` is the explicit user choice; the media
+ * query covers "System" (which sets no attribute at all). The explicit-light
+ * guard keeps a user who chose Light from being darkened by their OS.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --color-ink-50: #12161d;
+    --color-ink-100: #1b212b;
+    --color-ink-200: #2b3341;
+    --color-ink-300: #3d4757;
+    --color-ink-400: #6b7689;
+    --color-ink-500: #8a94a6;
+    --color-ink-600: #a7b0bf;
+    --color-ink-700: #c3cad6;
+    --color-ink-800: #dfe4ec;
+    --color-ink-900: #f2f5f9;
+
+    --color-clinical-50: #16263a;
+    --color-clinical-100: #1b3450;
+    --color-clinical-200: #2c496e;
+    --color-clinical-500: #5b9ad8;
+    --color-clinical-600: #74ace4;
+    --color-clinical-700: #9cc6ee;
+
+    --color-surface: #171c25;
+    --color-surface-muted: #1b212b;
+    --color-canvas: #0f141b;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-ink-50: #12161d;
+  --color-ink-100: #1b212b;
+  --color-ink-200: #2b3341;
+  --color-ink-300: #3d4757;
+  --color-ink-400: #6b7689;
+  --color-ink-500: #8a94a6;
+  --color-ink-600: #a7b0bf;
+  --color-ink-700: #c3cad6;
+  --color-ink-800: #dfe4ec;
+  --color-ink-900: #f2f5f9;
+
+  --color-clinical-50: #16263a;
+  --color-clinical-100: #1b3450;
+  --color-clinical-200: #2c496e;
+  --color-clinical-500: #5b9ad8;
+  --color-clinical-600: #74ace4;
+  --color-clinical-700: #9cc6ee;
+
+  --color-surface: #171c25;
+  --color-surface-muted: #1b212b;
+  --color-canvas: #0f141b;
+}
+
+/* Font size preference (spec §50). */
+:root[data-font-size="compact"] {
+  --app-font-scale: 0.9375;
+}
+:root[data-font-size="large"] {
+  --app-font-scale: 1.125;
+}
+
+/* Density preference: tightens the vertical rhythm between stacked blocks. */
+:root[data-density="compact"] {
+  --app-density-gap: 0.75;
+}
+
+/*
+ * Accent preference (spec §50): a fixed palette, never free-form colour input,
+ * so an accent can never destroy contrast. Each accent ships a light and a dark
+ * variant because the accent blocks are applied after the theme blocks and
+ * would otherwise leave a dark-mode user with an unreadably dark accent.
+ */
+:root[data-accent="teal"] {
+  --color-clinical-50: #eaf5f3;
+  --color-clinical-100: #cfe8e4;
+  --color-clinical-200: #a5d2cc;
+  --color-clinical-500: #17786f;
+  --color-clinical-600: #12645d;
+  --color-clinical-700: #0d4e49;
+}
+:root[data-accent="indigo"] {
+  --color-clinical-50: #eef0fb;
+  --color-clinical-100: #dadef6;
+  --color-clinical-200: #b8bfe9;
+  --color-clinical-500: #4b56b8;
+  --color-clinical-600: #3d479b;
+  --color-clinical-700: #30387b;
+}
+:root[data-accent="slate"] {
+  --color-clinical-50: #eef1f5;
+  --color-clinical-100: #dde3ec;
+  --color-clinical-200: #c2cbd9;
+  --color-clinical-500: #52607a;
+  --color-clinical-600: #414d63;
+  --color-clinical-700: #333c4e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-accent="teal"] {
+    --color-clinical-50: #102a27;
+    --color-clinical-100: #16413c;
+    --color-clinical-200: #1f5d56;
+    --color-clinical-500: #4fb3a7;
+    --color-clinical-600: #6cc6bb;
+    --color-clinical-700: #97dbd3;
+  }
+  :root:not([data-theme="light"])[data-accent="indigo"] {
+    --color-clinical-50: #1a1d33;
+    --color-clinical-100: #262b4d;
+    --color-clinical-200: #363d6b;
+    --color-clinical-500: #8f97e0;
+    --color-clinical-600: #a5abe8;
+    --color-clinical-700: #c0c4f0;
+  }
+  :root:not([data-theme="light"])[data-accent="slate"] {
+    --color-clinical-50: #1a1f28;
+    --color-clinical-100: #252c38;
+    --color-clinical-200: #343d4d;
+    --color-clinical-500: #97a4bb;
+    --color-clinical-600: #adb8cb;
+    --color-clinical-700: #c6cedb;
+  }
+}
+
+:root[data-theme="dark"][data-accent="teal"] {
+  --color-clinical-50: #102a27;
+  --color-clinical-100: #16413c;
+  --color-clinical-200: #1f5d56;
+  --color-clinical-500: #4fb3a7;
+  --color-clinical-600: #6cc6bb;
+  --color-clinical-700: #97dbd3;
+}
+:root[data-theme="dark"][data-accent="indigo"] {
+  --color-clinical-50: #1a1d33;
+  --color-clinical-100: #262b4d;
+  --color-clinical-200: #363d6b;
+  --color-clinical-500: #8f97e0;
+  --color-clinical-600: #a5abe8;
+  --color-clinical-700: #c0c4f0;
+}
+:root[data-theme="dark"][data-accent="slate"] {
+  --color-clinical-50: #1a1f28;
+  --color-clinical-100: #252c38;
+  --color-clinical-200: #343d4d;
+  --color-clinical-500: #97a4bb;
+  --color-clinical-600: #adb8cb;
+  --color-clinical-700: #c6cedb;
 }
 
 html,
 body {
-  background: var(--color-ink-50);
+  background: var(--color-canvas);
   color: var(--color-ink-900);
   -webkit-font-smoothing: antialiased;
+}
+
+html {
+  font-size: calc(16px * var(--app-font-scale));
 }
 
 body {
@@ -49,6 +222,12 @@ button,
 [role="button"],
 a.tap {
   touch-action: manipulation;
+}
+
+/* Dense EMR tables scroll inside themselves rather than the page. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (prefers-reduced-motion: reduce) {

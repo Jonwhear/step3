@@ -19,7 +19,7 @@ export function DischargeFlow({
   patientId: string;
   patientName: string;
   prompt: PromptView | null;
-  audio: { rate: number; voiceUri: string | null; autoRead: boolean };
+  audio: { rate: number; voiceUri: string | null };
 }) {
   const router = useRouter();
   const [answered, setAnswered] = useState(false);
@@ -49,7 +49,6 @@ export function DischargeFlow({
         <PromptCard
           patientId={patientId}
           prompt={prompt}
-          autoRead={audio.autoRead}
           ttsRate={audio.rate}
           voiceUri={audio.voiceUri}
           onGraded={() => setAnswered(true)}

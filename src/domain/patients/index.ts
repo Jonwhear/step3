@@ -160,6 +160,9 @@ export interface CreatePatientInput {
   roomNumber: string;
   entryMode: EntryMode;
   assignedDate: IsoDate;
+  /** Physical room being occupied, when the hospital map has capacity. */
+  roomId?: string | null;
+  locationType?: "ED" | "INPATIENT";
 }
 
 export function createPatientInstance(db: Db, input: CreatePatientInput): string {
@@ -178,7 +181,21 @@ export function createPatientInstance(db: Db, input: CreatePatientInput): string
       roundsCompleted: 0,
       currentRoundPromptIndex: 0,
       activeDatesJson: "[]",
+      roomId: input.roomId ?? null,
+      locationType: input.locationType ?? "INPATIENT",
     })
+    .run();
+
+  // Initials today, a generated headshot later (spec §31). Storing the row now
+  // means no caller has to care which of the two it is getting.
+  db.insert(t.patientVisual)
+    .values({
+      patientInstanceId: id,
+      assetType: "INITIALS",
+      assetPath: null,
+      fallbackInitials: initialsOf(input.patientName),
+    })
+    .onConflictDoNothing()
     .run();
 
   recordStudyEvent(db, {
@@ -190,6 +207,13 @@ export function createPatientInstance(db: Db, input: CreatePatientInput): string
   });
 
   return id;
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+  return (first + last).toUpperCase() || "??";
 }
 
 export function parseActiveDates(patient: t.PatientInstanceRow): IsoDate[] {
@@ -305,8 +329,16 @@ export function dischargePatient(
   patient: t.PatientInstanceRow,
   today: IsoDate = todayIso(),
 ): void {
+  // Clearing roomId is what frees the bed: occupancy is derived from active
+  // patients pointing at rooms, so there is no second place to update.
   db.update(t.patientInstance)
-    .set({ state: "DISCHARGED", dischargedAt: nowIso(), lastInteractedAt: nowIso() })
+    .set({
+      state: "DISCHARGED",
+      dischargedAt: nowIso(),
+      lastInteractedAt: nowIso(),
+      roomId: null,
+      locationType: "DISCHARGED",
+    })
     .where(eq(t.patientInstance.id, patient.id))
     .run();
   touchPatient(db, patient, today);

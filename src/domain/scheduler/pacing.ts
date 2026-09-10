@@ -101,9 +101,17 @@ export function calculateCatchUpAdjustment(deficit: number): number {
   return Math.min(deficit / SCHEDULER_CONFIG.CATCHUP_SPREAD_DAYS, SCHEDULER_CONFIG.CATCHUP_CAP);
 }
 
-/** Panel slots available before MAX_ACTIVE_PANEL_SIZE is reached. */
-export function availablePanelSlots(activePanelSize: number): number {
-  return Math.max(0, SCHEDULER_CONFIG.MAX_ACTIVE_PANEL_SIZE - activePanelSize);
+/**
+ * Panel slots left before the census cap.
+ *
+ * The cap is passed in because it is the *effective* one: the smaller of the
+ * physical inpatient rooms and whatever ceiling the learner set (spec §55).
+ */
+export function availablePanelSlots(
+  activePanelSize: number,
+  cap: number = SCHEDULER_CONFIG.MAX_ACTIVE_PANEL_SIZE,
+): number {
+  return Math.max(0, cap - activePanelSize);
 }
 
 export type PaceStatus = "ahead" | "on_pace" | "behind";

@@ -126,7 +126,6 @@ export function getCurrentRotation(db: Db, date: IsoDate = todayIso()): CurrentR
 export const SETTING_KEYS = {
   ttsRate: "tts.rate",
   ttsVoice: "tts.voice",
-  autoRead: "audio.autoRead",
   onboarded: "profile.onboarded",
 } as const;
 
@@ -152,15 +151,17 @@ export function setSetting(db: Db, key: string, value: string): void {
 export interface AudioPreferences {
   rate: number;
   voiceUri: string | null;
-  autoRead: boolean;
 }
 
+/**
+ * There is deliberately no "read aloud automatically" preference: nothing in
+ * the app plays on mount any more (spec §19). Audio always starts from Play.
+ */
 export function getAudioPreferences(db: Db): AudioPreferences {
   const settings = getSettings(db);
   const rate = Number(settings[SETTING_KEYS.ttsRate]);
   return {
     rate: Number.isFinite(rate) && rate > 0 ? rate : APP_CONFIG.defaults.ttsRate,
-    voiceUri: settings[SETTING_KEYS.ttsVoice] ?? null,
-    autoRead: settings[SETTING_KEYS.autoRead] === "true",
+    voiceUri: settings[SETTING_KEYS.ttsVoice] || null,
   };
 }

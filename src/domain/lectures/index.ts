@@ -6,7 +6,8 @@
  * for the next few days (spec §33).
  */
 
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
+import { renderSectionForSpeech } from "@/lib/audio/speechText";
 import { SCHEDULER_CONFIG, LECTURE_PRIORITY } from "@/config/scheduler";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
@@ -18,6 +19,24 @@ import { addDays, nowIso, todayIso, type IsoDate } from "@/lib/date";
 import { seededUnit } from "@/lib/seededRandom";
 import { MASTERY_LEVELS } from "@/config/scheduler";
 
+/**
+ * One navigable lecture section. `speechText` is rendered separately from
+ * `body` so markdown never reaches the synthesiser (spec §60).
+ */
+export interface LectureSectionView {
+  id: string;
+  /** Empty for legacy flat scripts that predate headings. */
+  heading: string;
+  /** Always safe to show in a list: falls back to "Part N". */
+  displayLabel: string;
+  body: string;
+  speechText: string;
+  mediaType: string | null;
+  mediaAssetPath: string | null;
+  caption: string | null;
+  altText: string | null;
+}
+
 export interface LectureView {
   id: string;
   code: string;
@@ -27,22 +46,66 @@ export interface LectureView {
   lectureType: LectureType;
   lectureTypeLabel: string;
   summary: string;
-  sections: string[];
+  sections: LectureSectionView[];
   keyPoints: string[];
   estimatedMinutes: number;
   status: LectureStatus;
   completedAt: string | null;
 }
 
-export function parseLecture(row: t.LectureRow, status: LectureStatus = "NOT_STARTED", completedAt: string | null = null): LectureView {
-  const parseArray = (json: string): string[] => {
-    try {
-      const parsed: unknown = JSON.parse(json);
-      return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
-    } catch {
-      return [];
-    }
+function parseArray(json: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function toSectionView(row: t.LectureSectionRow, index: number): LectureSectionView {
+  return {
+    id: row.id,
+    heading: row.heading,
+    displayLabel: row.heading.trim() || `Part ${index + 1}`,
+    body: row.body,
+    speechText: renderSectionForSpeech({ heading: row.heading, body: row.body }),
+    mediaType: row.mediaType,
+    mediaAssetPath: row.mediaAssetPath,
+    caption: row.caption,
+    altText: row.altText,
   };
+}
+
+function loadSections(db: Db, lectureId: string, row: t.LectureRow): LectureSectionView[] {
+  const stored = db
+    .select()
+    .from(t.lectureSection)
+    .where(eq(t.lectureSection.lectureId, lectureId))
+    .orderBy(asc(t.lectureSection.displayOrder))
+    .all();
+
+  if (stored.length > 0) return stored.map(toSectionView);
+
+  // A lecture imported before sections existed still has to be playable.
+  return parseArray(row.audioScript).map((body, index) => ({
+    id: `${lectureId}:legacy:${index}`,
+    heading: "",
+    displayLabel: `Part ${index + 1}`,
+    body,
+    speechText: renderSectionForSpeech({ body }),
+    mediaType: null,
+    mediaAssetPath: null,
+    caption: null,
+    altText: null,
+  }));
+}
+
+export function parseLecture(
+  db: Db,
+  row: t.LectureRow,
+  status: LectureStatus = "NOT_STARTED",
+  completedAt: string | null = null,
+): LectureView {
   return {
     id: row.id,
     code: row.code,
@@ -52,7 +115,7 @@ export function parseLecture(row: t.LectureRow, status: LectureStatus = "NOT_STA
     lectureType: row.lectureType as LectureType,
     lectureTypeLabel: LECTURE_TYPE_LABELS[row.lectureType as LectureType] ?? "Teaching Conference",
     summary: row.summary,
-    sections: parseArray(row.audioScript),
+    sections: loadSections(db, row.id, row),
     keyPoints: parseArray(row.keyPointsJson),
     estimatedMinutes: row.estimatedMinutes,
     status,
@@ -76,6 +139,7 @@ export function listLectures(db: Db): LectureView[] {
     .map((row) => {
       const state = states.get(row.id);
       return parseLecture(
+        db,
         row,
         (state?.status as LectureStatus) ?? "NOT_STARTED",
         state?.completedAt ?? null,
@@ -93,7 +157,12 @@ export function getLecture(db: Db, lectureId: string): LectureView | null {
       and(eq(t.userLectureState.userId, USER_ID), eq(t.userLectureState.lectureId, lectureId)),
     )
     .get();
-  return parseLecture(row, (state?.status as LectureStatus) ?? "NOT_STARTED", state?.completedAt ?? null);
+  return parseLecture(
+    db,
+    row,
+    (state?.status as LectureStatus) ?? "NOT_STARTED",
+    state?.completedAt ?? null,
+  );
 }
 
 export function getLectureConceptIds(db: Db, lectureId: string): string[] {

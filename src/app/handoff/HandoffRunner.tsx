@@ -11,9 +11,11 @@
  * player carries every section in order.
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { acceptPatientAction, saveAudioPreferenceAction } from "@/app/actions";
-import { AudioPlayer } from "@/components/audio/AudioPlayer";
+import { AudioTransport } from "@/components/audio/AudioTransport";
+import { useSpeechPlayer } from "@/components/audio/useSpeechPlayer";
+import { renderTextForSpeech } from "@/lib/audio/speechText";
 import { Badge, Card, EmptyState, SectionHeading } from "@/components/ui";
 
 export interface HandoffItem {
@@ -33,11 +35,38 @@ export function HandoffRunner({
   audio,
 }: {
   items: HandoffItem[];
-  audio: { rate: number; voiceUri: string | null; autoRead: boolean };
+  audio: { rate: number; voiceUri: string | null };
 }) {
   const [index, setIndex] = useState(0);
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
+
+  // One audio section per patient, so pressing Play walks the whole sign-out
+  // list without the learner touching the screen.
+  const sections = useMemo(
+    () =>
+      items.map((item) => ({
+        label: `${item.roomNumber} — ${item.patientName}`,
+        text: renderTextForSpeech(
+          item.isNew && item.teachingPoint
+            ? `${item.script} ${item.teachingPoint}`
+            : item.script,
+        ),
+      })),
+    [items],
+  );
+
+  const player = useSpeechPlayer(sections, {
+    rate: audio.rate,
+    voiceUri: audio.voiceUri,
+    debugLabel: "Sign-out",
+  });
+
+  // Audio drives the visible patient; the list and the voice never disagree.
+  const playerIndex = player.machine.index;
+  useEffect(() => {
+    setIndex(playerIndex);
+  }, [playerIndex]);
 
   if (items.length === 0) {
     return (
@@ -50,14 +79,6 @@ export function HandoffRunner({
 
   const current = items[index];
   if (!current) return null;
-
-  // One audio section per patient: the player advances through the whole
-  // handoff without the learner touching the screen.
-  const sections = items.map((item) =>
-    item.isNew
-      ? `${item.script} ${item.teachingPoint}`
-      : item.script,
-  );
 
   const isAccepted = accepted.has(current.patientId);
 
@@ -72,13 +93,11 @@ export function HandoffRunner({
 
   return (
     <div className="space-y-4">
-      <AudioPlayer
+      <AudioTransport
+        player={player}
         label="Sign-out"
-        sections={sections}
-        initialRate={audio.rate}
-        initialVoiceUri={audio.voiceUri}
-        autoRead={audio.autoRead}
-        onSectionChange={setIndex}
+        rate={audio.rate}
+        voiceUri={audio.voiceUri}
         onPreferenceChange={(prefs) => void saveAudioPreferenceAction(prefs)}
       />
 
@@ -134,7 +153,7 @@ export function HandoffRunner({
       <nav className="flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={() => setIndex((i) => Math.max(0, i - 1))}
+          onClick={() => player.select(index - 1)}
           disabled={index === 0}
           className="h-11 rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700 disabled:opacity-40"
         >
@@ -145,7 +164,7 @@ export function HandoffRunner({
         </span>
         <button
           type="button"
-          onClick={() => setIndex((i) => Math.min(items.length - 1, i + 1))}
+          onClick={() => player.select(index + 1)}
           disabled={index >= items.length - 1}
           className="h-11 rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700 disabled:opacity-40"
         >
@@ -159,11 +178,11 @@ export function HandoffRunner({
           <li key={item.patientId}>
             <button
               type="button"
-              onClick={() => setIndex(i)}
+              onClick={() => player.select(i)}
               className={`tap flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm ${
                 i === index
                   ? "border-clinical-200 bg-clinical-50 text-clinical-700"
-                  : "border-ink-200 bg-white text-ink-700"
+                  : "border-ink-200 bg-surface text-ink-700"
               }`}
             >
               <span className="truncate">

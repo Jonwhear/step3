@@ -71,7 +71,7 @@ export function AdmissionWorkup({
   audio,
 }: {
   admission: AdmissionCase;
-  audio: { rate: number; voiceUri: string | null; autoRead: boolean };
+  audio: { rate: number; voiceUri: string | null };
 }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState(
@@ -262,7 +262,6 @@ export function AdmissionWorkup({
               key={currentPrompt.id}
               patientId={admission.patientId}
               prompt={currentPrompt}
-              autoRead={audio.autoRead}
               ttsRate={audio.rate}
               voiceUri={audio.voiceUri}
               onContinue={() => {

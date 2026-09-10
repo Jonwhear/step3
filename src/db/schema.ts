@@ -116,10 +116,44 @@ export const caseTemplate = sqliteTable(
     isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
     contentOrigin: text("content_origin").notNull().default("AUTHORED"),
     demoSeedVersion: text("demo_seed_version"),
+    /** DRAFT | NEEDS_REVIEW | REVIEWED | PUBLISHED | ARCHIVED (spec §62). */
+    status: text("status").notNull().default("PUBLISHED"),
+    reviewStatus: text("review_status").notNull().default("UNREVIEWED"),
+    reviewedAt: text("reviewed_at"),
+    reviewNotes: text("review_notes").notNull().default(""),
+    /** Owning content pack; builtin demo content belongs to the demo pack. */
+    packId: text("pack_id"),
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by").notNull().default("system"),
+    /** Set when this case was duplicated from a bundled one. */
+    derivedFromCaseId: text("derived_from_case_id"),
+    /* Demographics kept structured so the chart header never parses prose. */
+    patientAgeYears: integer("patient_age_years"),
+    patientSex: text("patient_sex"),
+    chiefComplaint: text("chief_complaint").notNull().default(""),
+    codeStatus: text("code_status").notNull().default(""),
+    allergies: text("allergies").notNull().default(""),
     createdAt: text("created_at").notNull().default(now),
     updatedAt: text("updated_at").notNull().default(now),
   },
-  (t) => [index("case_template_specialty_idx").on(t.specialty, t.topic)],
+  (t) => [
+    index("case_template_specialty_idx").on(t.specialty, t.topic),
+    index("case_template_status_idx").on(t.status),
+  ],
+);
+
+/** Snapshot taken before each custom-case edit so a bad edit can be reverted. */
+export const caseRevision = sqliteTable(
+  "case_revision",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id").notNull(),
+    version: integer("version").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("case_revision_case_idx").on(t.caseId, t.version)],
 );
 
 export const caseConcept = sqliteTable(
@@ -153,8 +187,147 @@ export const caseFinding = sqliteTable(
       .notNull()
       .default(false),
     displayOrder: integer("display_order").notNull().default(0),
+    /**
+     * KEY_POSITIVE | KEY_NEGATIVE | CONTEXT | DISTRACTOR (spec §12).
+     * Authoring/debugging metadata — never surfaced to the learner.
+     */
+    clinicalRole: text("clinical_role").notNull().default("CONTEXT"),
   },
   (t) => [index("case_finding_case_idx").on(t.caseId, t.displayOrder)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Laboratory library (spec §14)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Central reference-range library. Normal ranges live here once rather than
+ * being repeated in every case file, so a range correction lands everywhere.
+ */
+export const labDefinition = sqliteTable(
+  "lab_definition",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    units: text("units").notNull().default(""),
+    referenceLow: real("reference_low"),
+    referenceHigh: real("reference_high"),
+    /** Used when a numeric range is meaningless ("negative", "clear"). */
+    referenceText: text("reference_text"),
+    /** JSON: { male: {low, high}, female: {low, high} } when sex matters. */
+    sexSpecificRangeJson: text("sex_specific_range_json"),
+    /** CBC | BMP | LIVER | COAGULATION | CARDIAC | URINALYSIS | OTHER */
+    category: text("category").notNull().default("OTHER"),
+    displayOrder: integer("display_order").notNull().default(0),
+    isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+    contentOrigin: text("content_origin").notNull().default("AUTHORED"),
+    demoSeedVersion: text("demo_seed_version"),
+  },
+  (t) => [index("lab_definition_category_idx").on(t.category, t.displayOrder)],
+);
+
+export const caseLabResult = sqliteTable(
+  "case_lab_result",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id").notNull(),
+    labDefinitionId: text("lab_definition_id").notNull(),
+    value: text("value").notNull(),
+    /** NORMAL | LOW | HIGH | CRITICAL_LOW | CRITICAL_HIGH | ABNORMAL */
+    flag: text("flag").notNull().default("NORMAL"),
+    /** Null means available from the start; otherwise this order reveals it. */
+    triggerActionCode: text("trigger_action_code"),
+    /** Narrative collection time, e.g. "Hospital day 1, 06:20". */
+    collectedLabel: text("collected_label").notNull().default(""),
+    clinicalRole: text("clinical_role").notNull().default("CONTEXT"),
+    displayOrder: integer("display_order").notNull().default(0),
+  },
+  (t) => [index("case_lab_result_case_idx").on(t.caseId, t.displayOrder)],
+);
+
+export const caseImagingResult = sqliteTable(
+  "case_imaging_result",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id").notNull(),
+    studyName: text("study_name").notNull(),
+    /** CT | XRAY | US | MRI | ECHO | NUCLEAR | OTHER */
+    modality: text("modality").notNull().default("OTHER"),
+    performedLabel: text("performed_label").notNull().default(""),
+    impression: text("impression").notNull(),
+    findingsText: text("findings_text").notNull().default(""),
+    triggerActionCode: text("trigger_action_code"),
+    /** Reserved for future attached media; null for text-only studies. */
+    imageAssetPath: text("image_asset_path"),
+    thumbnailAssetPath: text("thumbnail_asset_path"),
+    clinicalRole: text("clinical_role").notNull().default("CONTEXT"),
+    displayOrder: integer("display_order").notNull().default(0),
+  },
+  (t) => [index("case_imaging_result_case_idx").on(t.caseId, t.displayOrder)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Assessment & Plan (spec §20-21)                                      */
+/* ------------------------------------------------------------------ */
+
+/** A named problem on the case's problem list, e.g. "Upper GI Bleed". */
+export const caseProblem = sqliteTable(
+  "case_problem",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id").notNull(),
+    label: text("label").notNull(),
+    /** Shown once the learner adds the problem; never invented at runtime. */
+    assessmentText: text("assessment_text").notNull().default(""),
+    /** True when the learner is expected to identify this problem. */
+    isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+    isExpected: integer("is_expected", { mode: "boolean" }).notNull().default(true),
+    conceptId: text("concept_id"),
+    displayOrder: integer("display_order").notNull().default(0),
+  },
+  (t) => [index("case_problem_case_idx").on(t.caseId, t.displayOrder)],
+);
+
+/** One selectable plan item under a problem. Deterministically scored. */
+export const caseProblemOption = sqliteTable(
+  "case_problem_option",
+  {
+    id: text("id").primaryKey(),
+    problemId: text("problem_id").notNull(),
+    label: text("label").notNull(),
+    /** REQUIRED | APPROPRIATE | OPTIONAL | UNNECESSARY | CONTRAINDICATED */
+    classification: text("classification").notNull(),
+    /** Optional link to the shared action library. */
+    actionCode: text("action_code"),
+    feedbackText: text("feedback_text").notNull().default(""),
+    conceptId: text("concept_id"),
+    displayOrder: integer("display_order").notNull().default(0),
+  },
+  (t) => [index("case_problem_option_problem_idx").on(t.problemId, t.displayOrder)],
+);
+
+/** What this learner actually selected on this patient's plan. */
+export const patientPlanSelection = sqliteTable(
+  "patient_plan_selection",
+  {
+    patientInstanceId: text("patient_instance_id").notNull(),
+    optionId: text("option_id").notNull(),
+    problemId: text("problem_id").notNull(),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.patientInstanceId, t.optionId] })],
+);
+
+/** Problems the learner has added to this patient's problem list. */
+export const patientProblem = sqliteTable(
+  "patient_problem",
+  {
+    patientInstanceId: text("patient_instance_id").notNull(),
+    problemId: text("problem_id").notNull(),
+    addedAt: text("added_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.patientInstanceId, t.problemId] })],
 );
 
 export const actionDefinition = sqliteTable("action_definition", {
@@ -204,6 +377,11 @@ export const casePrompt = sqliteTable(
     correctFeedback: text("correct_feedback").notNull().default(""),
     incorrectFeedback: text("incorrect_feedback").notNull().default(""),
     conceptId: text("concept_id"),
+    /* Richer feedback (spec §24). All optional; blanks are simply not shown. */
+    whyCorrect: text("why_correct").notNull().default(""),
+    whyOthersWrong: text("why_others_wrong").notNull().default(""),
+    caseEvidence: text("case_evidence").notNull().default(""),
+    detailedExplanation: text("detailed_explanation").notNull().default(""),
   },
   (t) => [index("case_prompt_case_stage_idx").on(t.caseId, t.stage, t.sequence)],
 );
@@ -229,6 +407,30 @@ export const lecture = sqliteTable(
     demoSeedVersion: text("demo_seed_version"),
   },
   (t) => [index("lecture_specialty_idx").on(t.specialty, t.topic)],
+);
+
+/**
+ * Structured lecture body (spec §17). `body` holds a constrained markdown
+ * subset (paragraphs, `- ` bullets, `**bold**`) — never arbitrary HTML — and a
+ * separate plain-text rendering is produced for speech so markup is never read
+ * aloud (spec §60).
+ */
+export const lectureSection = sqliteTable(
+  "lecture_section",
+  {
+    id: text("id").primaryKey(),
+    lectureId: text("lecture_id").notNull(),
+    heading: text("heading").notNull(),
+    body: text("body").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+    ttsOrder: integer("tts_order").notNull().default(0),
+    /** IMAGE | DIAGRAM | TABLE — reserved; null for text-only sections. */
+    mediaType: text("media_type"),
+    mediaAssetPath: text("media_asset_path"),
+    caption: text("caption"),
+    altText: text("alt_text"),
+  },
+  (t) => [index("lecture_section_lecture_idx").on(t.lectureId, t.displayOrder)],
 );
 
 export const lectureConcept = sqliteTable(
@@ -272,12 +474,50 @@ export const patientInstance = sqliteTable(
     lastInteractedAt: text("last_interacted_at"),
     /** Set once the admission workup is finished. */
     admissionCompletedAt: text("admission_completed_at"),
+    /** ED | INPATIENT | DISCHARGED (spec §56). */
+    locationType: text("location_type").notNull().default("INPATIENT"),
+    /** Physical room occupied, once the hospital map is in play. */
+    roomId: text("room_id"),
   },
   (t) => [
     index("patient_instance_user_state_idx").on(t.userId, t.state),
     index("patient_instance_case_idx").on(t.caseId),
+    index("patient_instance_room_idx").on(t.roomId),
   ],
 );
+
+/**
+ * Physical hospital geography (spec §26-29). Rooms are seeded deterministically
+ * and a room is occupied by at most one active patient at a time.
+ */
+export const hospitalRoom = sqliteTable(
+  "hospital_room",
+  {
+    id: text("id").primaryKey(),
+    unit: text("unit").notNull(),
+    roomNumber: text("room_number").notNull(),
+    /** INPATIENT | ED | TRAUMA | BOARDING | HALLWAY */
+    roomType: text("room_type").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  },
+  (t) => [
+    uniqueIndex("hospital_room_unit_number_idx").on(t.unit, t.roomNumber),
+    index("hospital_room_type_idx").on(t.roomType, t.displayOrder),
+  ],
+);
+
+/**
+ * Patient thumbnail (spec §31). Initials are used today; the asset fields exist
+ * so a generated headshot can be attached later without touching callers.
+ */
+export const patientVisual = sqliteTable("patient_visual", {
+  patientInstanceId: text("patient_instance_id").primaryKey(),
+  /** INITIALS | HEADSHOT */
+  assetType: text("asset_type").notNull().default("INITIALS"),
+  assetPath: text("asset_path"),
+  fallbackInitials: text("fallback_initials").notNull(),
+});
 
 /** Actions the learner has taken during an admission, with revealed results. */
 export const patientAction = sqliteTable(
@@ -399,6 +639,160 @@ export const schedulerRun = sqliteTable(
   (t) => [uniqueIndex("scheduler_run_unique_idx").on(t.userId, t.runDate)],
 );
 
+/* ------------------------------------------------------------------ */
+/* Content provenance (spec §4-5)                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Portable content package (spec §41). Cases, lectures, concepts and learning
+ * points belong to a pack so a library can be exported, shared and re-imported.
+ */
+export const contentPack = sqliteTable("content_pack", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  author: text("author").notNull().default(""),
+  version: text("version").notNull().default("1.0.0"),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull().default(now),
+  updatedAt: text("updated_at").notNull().default(now),
+});
+
+/**
+ * Imported educational material. Only material the developer explicitly
+ * provides is ever stored here — nothing is fetched or scraped (spec §71).
+ */
+export const contentSource = sqliteTable(
+  "content_source",
+  {
+    id: text("id").primaryKey(),
+    /** DEMO | UWORLD | FIRST_AID | GUIDELINE | CUSTOM | OTHER */
+    sourceType: text("source_type").notNull(),
+    title: text("title").notNull(),
+    sourceIdentifier: text("source_identifier").notNull().default(""),
+    section: text("section").notNull().default(""),
+    subsection: text("subsection").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    version: text("version").notNull().default(""),
+    isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+    packId: text("pack_id"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [index("content_source_type_idx").on(t.sourceType)],
+);
+
+/**
+ * An explicit chunk of a source. Batching lives in the database rather than in
+ * a model's context, so no earlier chunk can be forgotten (spec §8).
+ */
+export const sourceFragment = sqliteTable(
+  "source_fragment",
+  {
+    id: text("id").primaryKey(),
+    contentSourceId: text("content_source_id").notNull(),
+    fragmentIndex: integer("fragment_index").notNull(),
+    label: text("label").notNull().default(""),
+    rawText: text("raw_text").notNull(),
+    normalizedText: text("normalized_text").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("source_fragment_source_index_idx").on(t.contentSourceId, t.fragmentIndex),
+  ],
+);
+
+/**
+ * A granular teachable claim extracted from source material. Finer-grained than
+ * a case: one case may cover thirty of these, and one may appear in many cases.
+ */
+export const learningPoint = sqliteTable(
+  "learning_point",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull().unique(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    specialty: text("specialty").notNull().default(""),
+    topic: text("topic").notNull().default(""),
+    importance: integer("importance").notNull().default(3),
+    contentSourceId: text("content_source_id"),
+    sourceFragmentId: text("source_fragment_id"),
+    /** UNPROCESSED | MAPPED | PARTIALLY_MAPPED | FULLY_MAPPED | EXCLUDED */
+    status: text("status").notNull().default("UNPROCESSED"),
+    /** UNREVIEWED | REVIEWED | NEEDS_CORRECTION */
+    reviewStatus: text("review_status").notNull().default("UNREVIEWED"),
+    /**
+     * Duplicate handling (spec §9): a non-canonical point names the canonical
+     * one it merges into. Merging is a manual workflow, never automatic.
+     */
+    canonicalLearningPointId: text("canonical_learning_point_id"),
+    isCanonical: integer("is_canonical", { mode: "boolean" }).notNull().default(true),
+    packId: text("pack_id"),
+    isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("learning_point_status_idx").on(t.status),
+    index("learning_point_specialty_idx").on(t.specialty, t.topic),
+    index("learning_point_canonical_idx").on(t.canonicalLearningPointId),
+  ],
+);
+
+/**
+ * Where a learning point is actually tested or taught. This is what makes the
+ * coverage audit answerable rather than guessed (spec §5).
+ */
+export const learningPointMapping = sqliteTable(
+  "learning_point_mapping",
+  {
+    id: text("id").primaryKey(),
+    learningPointId: text("learning_point_id").notNull(),
+    /** CASE | CASE_PROMPT | CASE_ACTION_RULE | CASE_PROBLEM_OPTION | LECTURE */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    /** Denormalised so "which patients test this?" is a single query. */
+    caseId: text("case_id"),
+    lectureId: text("lecture_id"),
+    notes: text("notes").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("learning_point_mapping_unique_idx").on(
+      t.learningPointId,
+      t.entityType,
+      t.entityId,
+    ),
+    index("learning_point_mapping_entity_idx").on(t.entityType, t.entityId),
+    index("learning_point_mapping_case_idx").on(t.caseId),
+  ],
+);
+
+/**
+ * "Why is this correct?" — ties any structured clinical claim back to the
+ * source that supports it (spec §10).
+ */
+export const evidenceLink = sqliteTable(
+  "evidence_link",
+  {
+    id: text("id").primaryKey(),
+    /** CONCEPT | LEARNING_POINT | CASE | CASE_FINDING | CASE_LAB_RESULT | ... */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    contentSourceId: text("content_source_id").notNull(),
+    sourceFragmentId: text("source_fragment_id"),
+    notes: text("notes").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("evidence_link_entity_idx").on(t.entityType, t.entityId),
+    index("evidence_link_source_idx").on(t.contentSourceId),
+  ],
+);
+
 export type UserProfileRow = typeof userProfile.$inferSelect;
 export type RotationBlockRow = typeof rotationBlock.$inferSelect;
 export type ConceptRow = typeof concept.$inferSelect;
@@ -415,3 +809,18 @@ export type UserLectureStateRow = typeof userLectureState.$inferSelect;
 export type SchedulerRunRow = typeof schedulerRun.$inferSelect;
 export type PatientActionRow = typeof patientAction.$inferSelect;
 export type PatientPromptResponseRow = typeof patientPromptResponse.$inferSelect;
+export type HospitalRoomRow = typeof hospitalRoom.$inferSelect;
+export type PatientVisualRow = typeof patientVisual.$inferSelect;
+export type LabDefinitionRow = typeof labDefinition.$inferSelect;
+export type CaseLabResultRow = typeof caseLabResult.$inferSelect;
+export type CaseImagingResultRow = typeof caseImagingResult.$inferSelect;
+export type CaseProblemRow = typeof caseProblem.$inferSelect;
+export type CaseProblemOptionRow = typeof caseProblemOption.$inferSelect;
+export type LectureSectionRow = typeof lectureSection.$inferSelect;
+export type ContentPackRow = typeof contentPack.$inferSelect;
+export type ContentSourceRow = typeof contentSource.$inferSelect;
+export type SourceFragmentRow = typeof sourceFragment.$inferSelect;
+export type LearningPointRow = typeof learningPoint.$inferSelect;
+export type LearningPointMappingRow = typeof learningPointMapping.$inferSelect;
+export type EvidenceLinkRow = typeof evidenceLink.$inferSelect;
+export type CaseRevisionRow = typeof caseRevision.$inferSelect;

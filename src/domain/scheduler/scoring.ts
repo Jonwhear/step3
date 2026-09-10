@@ -35,6 +35,11 @@ export interface ScoringContext {
   recentLectureConceptIds: Set<string>;
   /** Case id -> most recent assignment date, for the recency penalty. */
   lastAssignedByCase: Map<string, IsoDate>;
+  /**
+   * Rotation-relevance weight, resolved from the learner's "current-rotation
+   * emphasis" preference. Defaults to the configured weight (spec §49).
+   */
+  rotationRelevanceWeight?: number;
 }
 
 export interface ScoreBreakdown {
@@ -87,7 +92,8 @@ export function scoreCandidateCase(
   const W = SCHEDULER_CONFIG.WEIGHTS;
 
   const rotationRelevance =
-    rotationRelevanceFactor(candidate.specialty, ctx.rotationSpecialty) * W.rotationRelevance;
+    rotationRelevanceFactor(candidate.specialty, ctx.rotationSpecialty) *
+    (ctx.rotationRelevanceWeight ?? W.rotationRelevance);
 
   const spacedRepetitionDue =
     conceptFraction(candidate.conceptIds, ctx.dueConceptIds) * W.spacedRepetitionDue;

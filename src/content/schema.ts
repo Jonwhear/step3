@@ -151,6 +151,24 @@ export const caseTemplateSchema = z.object({
 });
 export type CaseTemplateInput = z.input<typeof caseTemplateSchema>;
 
+/**
+ * A headed lecture section (spec §17).
+ *
+ * `body` uses a constrained markdown subset — paragraphs, `- ` bullets and
+ * `**bold**` — never raw HTML, so it can be rendered safely on screen and
+ * re-rendered separately as plain text for speech (spec §60).
+ */
+export const lectureSectionSchema = z.object({
+  heading: z.string().min(2),
+  body: z.string().min(20),
+  /** Reserved for future figures; text-only sections omit these. */
+  mediaType: z.enum(["IMAGE", "DIAGRAM", "TABLE"]).optional(),
+  mediaAssetPath: z.string().optional(),
+  caption: z.string().optional(),
+  altText: z.string().optional(),
+});
+export type LectureSectionInput = z.input<typeof lectureSectionSchema>;
+
 export const lectureSchema = z.object({
   code: z.string().min(3),
   title: z.string().min(3),
@@ -158,8 +176,13 @@ export const lectureSchema = z.object({
   topic: z.string().min(2),
   lectureType: z.enum(LECTURE_TYPES),
   summary: z.string().min(20),
-  /** Sections are read one at a time so audio can advance section-by-section. */
+  /**
+   * Flat script, read one paragraph at a time. Retained because most bundled
+   * lectures still use it; a lecture that supplies `sections` overrides it.
+   */
   audioScript: z.array(z.string().min(20)).min(2),
+  /** Structured, headed body. Preferred for new content. */
+  sections: z.array(lectureSectionSchema).optional(),
   keyPoints: z.array(z.string().min(5)).min(2),
   estimatedMinutes: z.number().int().min(1).max(20).default(5),
   conceptCodes: z.array(z.string()).min(1),

@@ -27,7 +27,6 @@ export const APP_CONFIG = {
   defaults: {
     targetPatientCount: 300,
     ttsRate: 1.0,
-    autoReadAloud: false,
   },
 
   /** Playback speeds offered by the audio player. */

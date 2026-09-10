@@ -27,7 +27,7 @@ export function RoundsRunner({
   audio,
 }: {
   stops: RoundsStop[];
-  audio: { rate: number; voiceUri: string | null; autoRead: boolean };
+  audio: { rate: number; voiceUri: string | null };
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -98,7 +98,6 @@ export function RoundsRunner({
           key={`${stop.patientId}:${stop.prompt.id}`}
           patientId={stop.patientId}
           prompt={stop.prompt}
-          autoRead={audio.autoRead}
           ttsRate={audio.rate}
           voiceUri={audio.voiceUri}
           onContinue={advance}

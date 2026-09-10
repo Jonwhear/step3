@@ -3,20 +3,34 @@
 /**
  * Teaching Conference player.
  *
- * Audio-first: the script is read section by section, with the active section
- * highlighted. Completing it introduces the linked concepts, which is what
- * makes related cases score higher over the following days (spec §33).
+ * Section-driven (spec §17-18): the body is a list of headed sections, clicking
+ * one jumps playback there, and the section being spoken is highlighted.
+ * Nothing plays until the learner presses Play (spec §19).
  */
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   completeLectureAction,
   saveAudioPreferenceAction,
   startLectureAction,
 } from "@/app/actions";
-import { AudioPlayer } from "@/components/audio/AudioPlayer";
+import { AudioTransport } from "@/components/audio/AudioTransport";
+import { useSpeechPlayer } from "@/components/audio/useSpeechPlayer";
+import { LectureBody } from "@/components/lecture/LectureBody";
 import { Badge, Card } from "@/components/ui";
+
+export interface LectureSectionProp {
+  id: string;
+  heading: string;
+  displayLabel: string;
+  body: string;
+  speechText: string;
+  mediaType: string | null;
+  mediaAssetPath: string | null;
+  caption: string | null;
+  altText: string | null;
+}
 
 export interface LecturePlayerProps {
   lecture: {
@@ -26,21 +40,32 @@ export interface LecturePlayerProps {
     specialty: string;
     topic: string;
     summary: string;
-    sections: string[];
+    sections: LectureSectionProp[];
     keyPoints: string[];
     estimatedMinutes: number;
     status: string;
     conceptCount: number;
   };
-  audio: { rate: number; voiceUri: string | null; autoRead: boolean };
+  audio: { rate: number; voiceUri: string | null };
 }
 
 export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
   const router = useRouter();
-  const [active, setActive] = useState(0);
   const [reachedEnd, setReachedEnd] = useState(false);
   const [pending, startTransition] = useTransition();
   const [completed, setCompleted] = useState(lecture.status === "COMPLETED");
+
+  const speechSections = useMemo(
+    () => lecture.sections.map((s) => ({ label: s.displayLabel, text: s.speechText })),
+    [lecture.sections],
+  );
+
+  const player = useSpeechPlayer(speechSections, {
+    rate: audio.rate,
+    voiceUri: audio.voiceUri,
+    onFinished: () => setReachedEnd(true),
+    debugLabel: `Conference — ${lecture.title}`,
+  });
 
   // Mark as in-progress once, so the conference list reflects reality.
   useEffect(() => {
@@ -60,6 +85,8 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
     });
   };
 
+  const active = player.machine.index;
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -78,32 +105,67 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
         <p className="mt-3 text-sm leading-relaxed text-ink-700">{lecture.summary}</p>
       </Card>
 
-      <AudioPlayer
+      <AudioTransport
+        player={player}
         label="Conference audio"
-        sections={lecture.sections}
-        initialRate={audio.rate}
-        initialVoiceUri={audio.voiceUri}
-        autoRead={audio.autoRead}
-        onSectionChange={setActive}
-        onFinished={() => setReachedEnd(true)}
+        rate={audio.rate}
+        voiceUri={audio.voiceUri}
         onPreferenceChange={(prefs) => void saveAudioPreferenceAction(prefs)}
       />
 
-      <Card className="divide-y divide-ink-100">
+      {/* Contents: tapping a heading moves playback there immediately. */}
+      <nav aria-label="Lecture contents">
+        <Card className="divide-y divide-ink-100">
+          {lecture.sections.map((section, index) => (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => player.select(index)}
+              aria-current={index === active ? "true" : undefined}
+              className={`tap flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm ${
+                index === active
+                  ? "bg-clinical-50 font-medium text-clinical-700"
+                  : "text-ink-700"
+              }`}
+            >
+              <span className="w-5 shrink-0 text-xs tabular-nums text-ink-400">
+                {index + 1}
+              </span>
+              <span className="truncate">{section.displayLabel}</span>
+              {index === active && player.machine.state === "PLAYING" ? (
+                <span className="ml-auto text-[11px] uppercase tracking-wide text-clinical-600">
+                  Playing
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </Card>
+      </nav>
+
+      <div className="space-y-3">
         {lecture.sections.map((section, index) => (
-          <button
-            key={index}
-            type="button"
-            onClick={() => setActive(index)}
-            className={`tap block w-full px-4 py-3 text-left text-sm leading-relaxed ${
-              index === active ? "bg-clinical-50 text-clinical-700" : "text-ink-700"
+          <Card
+            key={section.id}
+            className={`p-4 ${
+              index === active ? "border-clinical-300 ring-1 ring-clinical-200" : ""
             }`}
           >
-            <span className="mr-2 text-xs tabular-nums text-ink-400">{index + 1}</span>
-            {section}
-          </button>
+            <button
+              type="button"
+              onClick={() => player.select(index)}
+              className="tap block w-full text-left"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-clinical-600">
+                {section.displayLabel}
+              </p>
+            </button>
+            <LectureBody body={section.body} className="mt-2" />
+            {section.caption ? (
+              <p className="mt-2 text-xs italic text-ink-500">{section.caption}</p>
+            ) : null}
+          </Card>
         ))}
-      </Card>
+      </div>
 
       <Card className="p-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500">
@@ -122,7 +184,7 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
       </Card>
 
       {completed ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
           Conference completed. {lecture.conceptCount} concept
           {lecture.conceptCount === 1 ? " has" : "s have"} been marked as
           introduced, and related patients are more likely to appear on your
@@ -135,13 +197,14 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
           disabled={pending}
           className="h-12 w-full rounded-lg bg-clinical-600 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {pending
-            ? "Saving…"
-            : reachedEnd
-              ? "Mark conference complete"
-              : "Mark conference complete"}
+          {pending ? "Saving…" : "Mark conference complete"}
         </button>
       )}
+      {reachedEnd && !completed ? (
+        <p className="text-center text-xs text-ink-500">
+          You have listened to every section.
+        </p>
+      ) : null}
     </div>
   );
 }

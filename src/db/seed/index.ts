@@ -30,6 +30,12 @@ export interface SeedResult {
   findings: number;
   actionRules: number;
   prompts: number;
+  lectureSections: number;
+  labDefinitions: number;
+  labResults: number;
+  imagingResults: number;
+  problems: number;
+  learningPoints: number;
 }
 
 export function seedDemoContent(db: Db): SeedResult {
@@ -42,6 +48,12 @@ export function seedDemoContent(db: Db): SeedResult {
     findings: 0,
     actionRules: 0,
     prompts: 0,
+    lectureSections: 0,
+    labDefinitions: 0,
+    labResults: 0,
+    imagingResults: 0,
+    problems: 0,
+    learningPoints: 0,
   };
 
   db.transaction((tx) => {
@@ -244,6 +256,46 @@ export function seedDemoContent(db: Db): SeedResult {
           .values({ lectureId, conceptId: id("concept", code) })
           .run();
       }
+
+      // Structured sections when the lecture authors them; otherwise one
+      // section per script paragraph with no heading, which the player renders
+      // as "Part N". Either way the audio path is identical (spec §17).
+      tx.delete(t.lectureSection).where(eq(t.lectureSection.lectureId, lectureId)).run();
+      const sections = l.sections?.length
+        ? l.sections.map((s) => ({
+            heading: s.heading,
+            body: s.body,
+            mediaType: s.mediaType ?? null,
+            mediaAssetPath: s.mediaAssetPath ?? null,
+            caption: s.caption ?? null,
+            altText: s.altText ?? null,
+          }))
+        : l.audioScript.map((body) => ({
+            heading: "",
+            body,
+            mediaType: null,
+            mediaAssetPath: null,
+            caption: null,
+            altText: null,
+          }));
+
+      sections.forEach((section, index) => {
+        tx.insert(t.lectureSection)
+          .values({
+            id: `${lectureId}:section:${index}`,
+            lectureId,
+            heading: section.heading,
+            body: section.body,
+            displayOrder: index,
+            ttsOrder: index,
+            mediaType: section.mediaType,
+            mediaAssetPath: section.mediaAssetPath,
+            caption: section.caption,
+            altText: section.altText,
+          })
+          .run();
+        result.lectureSections += 1;
+      });
     }
   });
 
