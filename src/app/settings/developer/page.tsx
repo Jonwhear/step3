@@ -6,10 +6,15 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
 import { Card, EmptyState, SectionHeading, StatRow } from "@/components/ui";
 import * as schema from "@/db/schema";
+import { INPATIENT_UNIT } from "@/config/hospital";
+import { listCaseSummaries } from "@/domain/content/cases";
+import { buildCoverageTotals } from "@/domain/content/provenance";
+import { buildFloorMap } from "@/domain/rooms";
 import { getSchedulerDebug } from "@/domain/scheduler";
 import { listStudyEvents } from "@/domain/patients";
 import { db } from "@/server/db";
 import { todayIso } from "@/lib/date";
+import { AudioStateInspector } from "./AudioStateInspector";
 import { DemoDataControls } from "./DemoDataControls";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +36,14 @@ export default function DeveloperPage() {
   };
 
   const events = listStudyEvents(database, 40);
+
+  const floor = buildFloorMap(database, { today });
+  const occupiedRooms = floor.filter((r) => r.patient).length;
+
+  const allCases = listCaseSummaries(database);
+  const publishedCases = allCases.filter((c) => c.status === "PUBLISHED").length;
+  const casesWithErrors = allCases.filter((c) => c.errorCount > 0).length;
+  const coverage = buildCoverageTotals(database);
 
   return (
     <>
@@ -83,9 +96,16 @@ export default function DeveloperPage() {
                 />
                 <StatRow
                   label="Active panel size"
-                  value={`${debug.activePanelSize} / ${SCHEDULER_CONFIG.MAX_ACTIVE_PANEL_SIZE}`}
+                  value={`${debug.activePanelSize} / ${debug.censusCap}`}
+                  hint={`ward holds ${debug.physicalRoomCap}`}
                 />
                 <StatRow label="Available panel slots" value={debug.availableSlots} />
+                <StatRow label="Available beds" value={debug.availableBeds} />
+                <StatRow
+                  label="Eligible cases"
+                  value={debug.eligibleCaseCount}
+                  hint={`${debug.excludedCaseCount} excluded of ${debug.totalCaseCount}`}
+                />
                 <StatRow label="New patients requested" value={debug.newPatientsRequested} />
                 <StatRow label="New patients assigned" value={debug.newPatientsAssigned} />
                 <StatRow label="Concepts due for review" value={debug.dueConceptCount} />
@@ -96,6 +116,18 @@ export default function DeveloperPage() {
                   hint={`${SCHEDULER_CONFIG.RECENT_LECTURE_WINDOW_DAYS}d window`}
                 />
               </Card>
+
+              {/* Spec §36: never fail silently. */}
+              {debug.blockedReason ? (
+                <Card className="border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800 dark:text-amber-300">
+                    Why wasn&apos;t a patient assigned?
+                  </p>
+                  <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
+                    {debug.blockedReason}
+                  </p>
+                </Card>
+              ) : null}
 
               {debug.notes.length > 0 ? (
                 <Card className="p-4">
@@ -201,6 +233,72 @@ export default function DeveloperPage() {
               </Card>
             </div>
           )}
+        </section>
+
+        {/* ----------------------------- rooms ------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Room state — {INPATIENT_UNIT}</SectionHeading>
+          <Card className="divide-y divide-ink-100">
+            {floor.map((room) => (
+              <div key={room.id} className="flex justify-between gap-4 px-4 py-2 text-sm">
+                <span className="tabular-nums text-ink-700">{room.roomNumber}</span>
+                <span className="text-right text-ink-500">
+                  {room.patient
+                    ? `${room.patient.name} · ${room.status.toLowerCase().replace("_", " ")}`
+                    : "empty"}
+                </span>
+              </div>
+            ))}
+          </Card>
+          <p className="mt-2 text-xs text-ink-400">
+            {occupiedRooms} occupied, {floor.length - occupiedRooms} free. Occupancy is
+            derived from active patients holding a room, so a room cannot be
+            double-booked.
+          </p>
+        </section>
+
+        {/* ----------------------------- audio ------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Audio state</SectionHeading>
+          <AudioStateInspector />
+        </section>
+
+        {/* --------------------------- content ------------------------------- */}
+        <section className="mt-6">
+          <SectionHeading>Content coverage</SectionHeading>
+          <Card className="divide-y divide-ink-100 px-4">
+            <StatRow label="Cases" value={`${publishedCases} / ${allCases.length}`} hint="published" />
+            <StatRow
+              label="Cases with validation errors"
+              value={casesWithErrors}
+              hint={casesWithErrors === 0 ? "library is clean" : "publication blocked"}
+            />
+            <StatRow label="Learning points" value={coverage.total} />
+            <StatRow label="Fully mapped" value={coverage.fullyMapped} />
+            <StatRow label="Partially mapped" value={coverage.partiallyMapped} />
+            <StatRow label="Unmapped" value={coverage.unmapped} />
+            <StatRow label="Patient coverage" value={`${coverage.patientCoveragePercent}%`} />
+          </Card>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Link
+              href="/settings/content"
+              className="inline-flex h-10 items-center rounded-lg border border-ink-200 px-3 text-sm font-medium text-ink-700"
+            >
+              Content library ›
+            </Link>
+            <Link
+              href="/settings/content/coverage"
+              className="inline-flex h-10 items-center rounded-lg border border-ink-200 px-3 text-sm font-medium text-ink-700"
+            >
+              Coverage audit ›
+            </Link>
+            <Link
+              href="/settings/content/packs"
+              className="inline-flex h-10 items-center rounded-lg border border-ink-200 px-3 text-sm font-medium text-ink-700"
+            >
+              Import / export ›
+            </Link>
+          </div>
         </section>
 
         {/* ------------------------ spaced repetition ------------------------ */}

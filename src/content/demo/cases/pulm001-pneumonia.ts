@@ -86,7 +86,8 @@ export const CASE_PULM_001: CaseTemplateInput = {
       conceptCode: "PULM.CAP.01",
       options: [
         { label: "Blood cultures before antibiotics", classification: "REQUIRED", actionCode: "ORDER_BLOOD_CULTURES", feedbackText: "Drawn first when it does not delay therapy." },
-        { label: "Empiric ceftriaxone plus azithromycin", classification: "REQUIRED", actionCode: "GIVE_ANTIBIOTICS", feedbackText: "Standard inpatient, non-ICU coverage including atypicals." },
+        { label: "Empiric ceftriaxone", classification: "REQUIRED", actionCode: "GIVE_CEFTRIAXONE", feedbackText: "Standard inpatient, non-ICU beta-lactam coverage." },
+        { label: "Add azithromycin for atypical coverage", classification: "REQUIRED", actionCode: "GIVE_AZITHROMYCIN", feedbackText: "Inpatient regimens pair a beta-lactam with atypical coverage." },
         { label: "Chest radiograph", classification: "REQUIRED", actionCode: "ORDER_CXR", feedbackText: "Confirms the diagnosis and defines the extent." },
         { label: "Supplemental oxygen to maintain saturation above 92%", classification: "REQUIRED", feedbackText: "She was 88% on room air on arrival." },
         { label: "Assess severity to set the site of care", classification: "REQUIRED", feedbackText: "Severity scoring is what decides ward versus ICU versus home." },
