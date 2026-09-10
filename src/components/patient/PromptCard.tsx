@@ -148,7 +148,7 @@ export function PromptCard({
             />
           ) : null}
 
-          {state.error ? <p className="text-sm text-rose-700">{state.error}</p> : null}
+          {state.error ? <p className="text-sm text-bad-700">{state.error}</p> : null}
 
           <button
             type="submit"
@@ -194,15 +194,15 @@ function PromptExplanation({ state }: { state: PromptResultState }) {
     <div
       className={`rounded-lg border p-3 ${
         correct
-          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30"
-          : "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30"
+          ? "border-good-200 bg-good-50"
+          : "border-warn-200 bg-warn-50"
       }`}
     >
       <p
         className={`text-sm font-semibold ${
           correct
-            ? "text-emerald-800 dark:text-emerald-300"
-            : "text-amber-900 dark:text-amber-300"
+            ? "text-good-700"
+            : "text-warn-700"
         }`}
       >
         {correct ? "Correct." : "Not quite."}

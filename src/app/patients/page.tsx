@@ -93,7 +93,7 @@ export default async function PatientHistoryPage({
             <select
               name="specialty"
               defaultValue={filters.specialty ?? ""}
-              className="h-11 rounded-lg border border-ink-200 bg-white px-2 text-sm"
+              className="h-11 rounded-lg border border-ink-200 bg-surface px-2 text-sm"
             >
               <option value="">All specialties</option>
               {specialties.map((s) => (
@@ -105,7 +105,7 @@ export default async function PatientHistoryPage({
             <select
               name="topic"
               defaultValue={filters.topic ?? ""}
-              className="h-11 rounded-lg border border-ink-200 bg-white px-2 text-sm"
+              className="h-11 rounded-lg border border-ink-200 bg-surface px-2 text-sm"
             >
               <option value="">All topics</option>
               {topics.map((t) => (
@@ -117,7 +117,7 @@ export default async function PatientHistoryPage({
             <select
               name="perf"
               defaultValue={filters.perf ?? ""}
-              className="h-11 rounded-lg border border-ink-200 bg-white px-2 text-sm"
+              className="h-11 rounded-lg border border-ink-200 bg-surface px-2 text-sm"
             >
               <option value="">Any performance</option>
               <option value="correct">All answers correct</option>
@@ -175,7 +175,7 @@ function HistoryRow({ row }: { row: HistoryRowData }) {
   return (
     <Link
       href={`/patients/${patient.id}`}
-      className="tap block rounded-xl border border-ink-200 bg-white p-3 hover:border-clinical-200"
+      className="tap block rounded-xl border border-ink-200 bg-surface p-3 hover:border-clinical-200"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

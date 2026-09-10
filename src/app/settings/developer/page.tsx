@@ -119,11 +119,11 @@ export default function DeveloperPage() {
 
               {/* Spec §36: never fail silently. */}
               {debug.blockedReason ? (
-                <Card className="border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800 dark:text-amber-300">
+                <Card className="border-warn-200 bg-warn-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-warn-700">
                     Why wasn&apos;t a patient assigned?
                   </p>
-                  <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
+                  <p className="mt-1 text-sm text-warn-700">
                     {debug.blockedReason}
                   </p>
                 </Card>
@@ -216,7 +216,7 @@ export default function DeveloperPage() {
                           <td className="py-1 px-1 text-right">+{s.weakness.toFixed(1)}</td>
                           <td className="py-1 px-1 text-right">+{s.recentLecture.toFixed(1)}</td>
                           <td className="py-1 px-1 text-right">+{s.step3Importance.toFixed(1)}</td>
-                          <td className="py-1 px-1 text-right text-rose-700">
+                          <td className="py-1 px-1 text-right text-bad-700">
                             −{s.recentlySeen.toFixed(1)}
                           </td>
                           <td className="py-1 px-1 text-right text-ink-400">

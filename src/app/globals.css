@@ -34,6 +34,24 @@
   --color-surface-muted: #f6f7f9;
   --color-canvas: #f6f7f9;
 
+  /*
+   * Clinical status colours, defined semantically rather than by hue. Tailwind's
+   * own emerald/amber/rose scales are fixed values and stay light in dark mode;
+   * these flip with the theme like the ink scale, so a status chip is legible in
+   * both without every usage carrying a `dark:` variant.
+   */
+  --color-good-50: #ecfdf5;
+  --color-good-200: #a7f3d0;
+  --color-good-700: #047857;
+
+  --color-warn-50: #fffbeb;
+  --color-warn-200: #fde68a;
+  --color-warn-700: #b45309;
+
+  --color-bad-50: #fff1f2;
+  --color-bad-200: #fecdd3;
+  --color-bad-700: #be123c;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 }
@@ -75,6 +93,17 @@
     --color-surface: #171c25;
     --color-surface-muted: #1b212b;
     --color-canvas: #0f141b;
+    --color-good-50: #052e23;
+    --color-good-200: #14513c;
+    --color-good-700: #6ee7b7;
+
+    --color-warn-50: #2e2005;
+    --color-warn-200: #5a3f0d;
+    --color-warn-700: #fcd34d;
+
+    --color-bad-50: #300811;
+    --color-bad-200: #5c1024;
+    --color-bad-700: #fda4af;
   }
 }
 
@@ -102,6 +131,18 @@
   --color-surface: #171c25;
   --color-surface-muted: #1b212b;
   --color-canvas: #0f141b;
+
+  --color-good-50: #052e23;
+  --color-good-200: #14513c;
+  --color-good-700: #6ee7b7;
+
+  --color-warn-50: #2e2005;
+  --color-warn-200: #5a3f0d;
+  --color-warn-700: #fcd34d;
+
+  --color-bad-50: #300811;
+  --color-bad-200: #5c1024;
+  --color-bad-700: #fda4af;
 }
 
 /* Font size preference (spec §50). */

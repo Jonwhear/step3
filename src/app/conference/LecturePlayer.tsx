@@ -184,7 +184,7 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
       </Card>
 
       {completed ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+        <p className="rounded-lg border border-good-200 bg-good-50 p-3 text-sm text-good-700">
           Conference completed. {lecture.conceptCount} concept
           {lecture.conceptCount === 1 ? " has" : "s have"} been marked as
           introduced, and related patients are more likely to appear on your

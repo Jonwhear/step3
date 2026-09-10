@@ -9,7 +9,7 @@
  * last known state and says so plainly rather than implying it is live.
  */
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Card } from "@/components/ui";
 import {
   getAudioDebug,
@@ -25,10 +25,19 @@ export function AudioStateInspector() {
     () => null,
   );
 
+  // Read after mount, not during render: `speechSupported()` is false on the
+  // server and true in the browser, and reading it inline makes the first
+  // client render disagree with the server HTML.
+  const [supported, setSupported] = useState<boolean | null>(null);
+  useEffect(() => setSupported(speechSupported()), []);
+
   return (
     <Card className="p-4">
       <dl className="space-y-1 text-sm">
-        <Row label="Speech synthesis available" value={speechSupported() ? "Yes" : "No"} />
+        <Row
+          label="Speech synthesis available"
+          value={supported === null ? "Checking…" : supported ? "Yes" : "No"}
+        />
         <Row label="Current state" value={snapshot?.state ?? "STOPPED"} />
         <Row label="Player" value={snapshot?.label ?? "None mounted"} />
         <Row

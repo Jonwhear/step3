@@ -28,7 +28,7 @@ import {
 import { getPreferences, resolveSchedulerTuning, SETTINGS_KEYS } from "@/domain/settings";
 import { DEMO_PATIENT_NAMES } from "@/content/demo/patientNames";
 import { seededUnit } from "@/lib/seededRandom";
-import { todayIso, type IsoDate } from "@/lib/date";
+import { nowIso, todayIso, type IsoDate } from "@/lib/date";
 import { rankCandidates, type CandidateCase } from "./scoring";
 
 /** Spec §35: two handoff patients and one active admission. */
@@ -163,6 +163,11 @@ export function bootstrapNewUserService(
   }
 
   markBootstrapped(db);
+  // Recorded so the daily scheduler knows not to top the starter panel up to
+  // the census cap on this same date — that would turn a deliberately gentle
+  // first day into a full service. It still runs, and still picks the day's
+  // teaching conference; it just assigns no additional patients.
+  if (patientIds.length > 0) setSetting(db, SETTINGS_KEYS.bootstrapDate, today);
 
   return {
     ran: patientIds.length > 0,
@@ -191,6 +196,11 @@ export function planEntryModes(capacity: number): ("HANDOFF" | "ADMISSION")[] {
   for (let i = 0; i < Math.min(handoffs, capacity); i += 1) plan.push("HANDOFF");
   while (plan.length < capacity) plan.push("ADMISSION");
   return plan.slice(0, capacity);
+}
+
+/** The date the starter service was created, if it has been. */
+export function getBootstrapDate(db: Db): string | null {
+  return getSettings(db)[SETTINGS_KEYS.bootstrapDate] ?? null;
 }
 
 function pickName(caseId: string, today: IsoDate, used: Set<string>): string {

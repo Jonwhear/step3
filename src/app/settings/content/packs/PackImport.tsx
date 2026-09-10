@@ -25,7 +25,7 @@ export function PackImport() {
   if (importState.status === "imported") {
     return (
       <Card className="p-4">
-        <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+        <p className="text-sm font-medium text-good-700">
           Import complete.
         </p>
         <ul className="mt-2 space-y-0.5">
@@ -69,12 +69,12 @@ export function PackImport() {
         </form>
 
         {inspectState.error ? (
-          <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+          <p className="mt-3 rounded-lg border border-bad-200 bg-bad-50 p-3 text-sm text-bad-700">
             {inspectState.error}
           </p>
         ) : null}
         {importState.error ? (
-          <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+          <p className="mt-3 rounded-lg border border-bad-200 bg-bad-50 p-3 text-sm text-bad-700">
             {importState.error}
           </p>
         ) : null}
@@ -126,8 +126,8 @@ export function PackImport() {
           ) : null}
 
           {inspectState.summary.conflicts.length > 0 ? (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+            <div className="mt-3 rounded-lg border border-warn-200 bg-warn-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-warn-700">
                 {inspectState.summary.conflicts.length} conflict
                 {inspectState.summary.conflicts.length === 1 ? "" : "s"} with existing content
               </p>
@@ -135,7 +135,7 @@ export function PackImport() {
                 {inspectState.summary.conflicts.slice(0, 10).map((conflict) => (
                   <li
                     key={`${conflict.kind}:${conflict.code}`}
-                    className="text-xs text-amber-900 dark:text-amber-300"
+                    className="text-xs text-warn-700"
                   >
                     {conflict.kind} {conflict.code} already exists
                   </li>

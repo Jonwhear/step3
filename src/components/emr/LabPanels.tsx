@@ -16,11 +16,11 @@ import type { LabFlag, LabPanelView } from "@/domain/labs";
 
 const FLAG_CLASS: Record<LabFlag, string> = {
   NORMAL: "",
-  LOW: "text-amber-700 dark:text-amber-400",
-  HIGH: "text-amber-700 dark:text-amber-400",
-  CRITICAL_LOW: "text-rose-700 dark:text-rose-400",
-  CRITICAL_HIGH: "text-rose-700 dark:text-rose-400",
-  ABNORMAL: "text-amber-700 dark:text-amber-400",
+  LOW: "text-warn-700",
+  HIGH: "text-warn-700",
+  CRITICAL_LOW: "text-bad-700",
+  CRITICAL_HIGH: "text-bad-700",
+  ABNORMAL: "text-warn-700",
 };
 
 export function LabPanels({
@@ -47,7 +47,7 @@ export function LabPanels({
           <SectionHeading>
             {panel.label}
             {panel.abnormalCount > 0 ? (
-              <span className="ml-2 font-normal normal-case tracking-normal text-amber-700 dark:text-amber-400">
+              <span className="ml-2 font-normal normal-case tracking-normal text-warn-700">
                 {panel.abnormalCount} abnormal
               </span>
             ) : null}

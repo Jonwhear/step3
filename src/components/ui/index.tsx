@@ -11,7 +11,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`rounded-xl border border-ink-200 bg-white shadow-[0_1px_2px_rgba(20,27,38,0.04)] ${className}`}
+      className={`rounded-xl border border-ink-200 bg-surface shadow-[0_1px_2px_rgba(20,27,38,0.04)] ${className}`}
     >
       {children}
     </div>
@@ -38,9 +38,9 @@ export function SectionHeading({
 const TONE_CLASSES = {
   neutral: "bg-ink-100 text-ink-700 border-ink-200",
   info: "bg-clinical-50 text-clinical-700 border-clinical-200",
-  good: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  warn: "bg-amber-50 text-amber-800 border-amber-200",
-  bad: "bg-rose-50 text-rose-800 border-rose-200",
+  good: "bg-good-50 text-good-700 border-good-200",
+  warn: "bg-warn-50 text-warn-700 border-warn-200",
+  bad: "bg-bad-50 text-bad-700 border-bad-200",
 } as const;
 
 export type Tone = keyof typeof TONE_CLASSES;
@@ -54,7 +54,7 @@ export function Badge({
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${TONE_CLASSES[tone]}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${TONE_CLASSES[tone]}`}
     >
       {children}
     </span>

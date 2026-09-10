@@ -207,7 +207,7 @@ export function AdmissionWorkup({
                             className={`tap min-h-11 rounded-lg border px-3 py-2 text-left text-sm ${
                               done
                                 ? "border-ink-100 bg-ink-50 text-ink-400"
-                                : "border-ink-200 bg-white text-ink-800"
+                                : "border-ink-200 bg-surface text-ink-800"
                             }`}
                           >
                             {done ? "✓ " : ""}

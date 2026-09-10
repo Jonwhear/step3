@@ -121,10 +121,10 @@ export function RoundsRunner({
               {stop.abnormalLabs.map((lab) => (
                 <li key={lab.label} className="text-sm text-ink-800">
                   {lab.label}{" "}
-                  <span className="font-medium tabular-nums text-amber-700 dark:text-amber-400">
+                  <span className="font-medium tabular-nums text-warn-700">
                     {lab.value}
                   </span>{" "}
-                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                  <span className="text-[10px] font-bold text-warn-700">
                     {lab.flag}
                   </span>
                 </li>

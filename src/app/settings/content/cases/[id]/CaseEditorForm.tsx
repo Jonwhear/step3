@@ -56,8 +56,8 @@ export function CaseEditorForm({
       <input type="hidden" name="caseId" value={values.id} />
 
       {!editable ? (
-        <Card className="mb-4 border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30">
-          <p className="text-sm text-amber-900 dark:text-amber-200">
+        <Card className="mb-4 border-warn-200 bg-warn-50 p-3">
+          <p className="text-sm text-warn-700">
             This is bundled demo content and is read-only. Duplicate it to make
             an editable copy — that way re-seeding the demo library can never
             overwrite your work.
@@ -169,12 +169,12 @@ export function CaseEditorForm({
       </fieldset>
 
       {state.error ? (
-        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+        <p className="mt-3 rounded-lg border border-bad-200 bg-bad-50 p-3 text-sm text-bad-700">
           {state.error}
         </p>
       ) : null}
       {state.message ? (
-        <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-400">{state.message}</p>
+        <p className="mt-3 text-sm text-good-700">{state.message}</p>
       ) : null}
 
       {editable ? (
@@ -229,7 +229,7 @@ export function CaseStatusControls({
         ))}
       </div>
       {state.error ? (
-        <p className="mt-2 text-sm text-rose-700 dark:text-rose-400">{state.error}</p>
+        <p className="mt-2 text-sm text-bad-700">{state.error}</p>
       ) : null}
       {state.message ? <p className="mt-2 text-sm text-ink-500">{state.message}</p> : null}
     </div>

@@ -17,7 +17,7 @@ export function PatientCard({ patient }: { patient: PanelPatient }) {
   return (
     <Link
       href={`/patients/${patient.id}`}
-      className="tap block rounded-xl border border-ink-200 bg-white p-3 transition-colors hover:border-clinical-200 hover:bg-clinical-50/40"
+      className="tap block rounded-xl border border-ink-200 bg-surface p-3 transition-colors hover:border-clinical-200 hover:bg-clinical-50/40"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

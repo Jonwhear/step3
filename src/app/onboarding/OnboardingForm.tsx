@@ -83,12 +83,12 @@ export function OnboardingForm({
       </Field>
 
       {state.error ? (
-        <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">
+        <p className="rounded-lg border border-bad-200 bg-bad-50 p-2 text-sm text-bad-700">
           {state.error}
         </p>
       ) : null}
       {state.ok ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-800">
+        <p className="rounded-lg border border-good-200 bg-good-50 p-2 text-sm text-good-700">
           Saved. Add your rotation schedule below.
         </p>
       ) : null}

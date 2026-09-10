@@ -25,7 +25,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-ink-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-ink-200 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85"
     >
       <ul className="mx-auto flex max-w-3xl">
         {ITEMS.map((item) => {

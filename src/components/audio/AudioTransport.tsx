@@ -32,7 +32,7 @@ export function AudioTransport({
 
   if (!supported) {
     return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+      <div className="rounded-xl border border-warn-200 bg-warn-50 p-3 text-sm text-warn-700">
         This browser does not support speech synthesis, so audio playback is
         unavailable. All content remains readable on screen.
       </div>

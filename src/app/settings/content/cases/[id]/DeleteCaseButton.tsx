@@ -22,12 +22,12 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
         <button
           type="button"
           onClick={() => setArmed(true)}
-          className="h-11 w-full rounded-lg border border-rose-200 text-sm font-medium text-rose-700 dark:border-rose-900/60 dark:text-rose-400"
+          className="h-11 w-full rounded-lg border border-bad-200 text-sm font-medium text-bad-700"
         >
           Delete this case permanently
         </button>
         {state.error ? (
-          <p className="mt-2 text-sm text-rose-700 dark:text-rose-400">{state.error}</p>
+          <p className="mt-2 text-sm text-bad-700">{state.error}</p>
         ) : null}
       </>
     );
@@ -56,7 +56,7 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
         </button>
       </div>
       {state.error ? (
-        <p className="mt-2 text-sm text-rose-700 dark:text-rose-400">{state.error}</p>
+        <p className="mt-2 text-sm text-bad-700">{state.error}</p>
       ) : null}
     </form>
   );

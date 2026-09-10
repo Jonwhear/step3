@@ -134,7 +134,7 @@ export function MicInput({
   };
 
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-3">
+    <div className="rounded-xl border border-ink-200 bg-surface p-3">
       {helpText ? <p className="mb-2 text-xs text-ink-500">{helpText}</p> : null}
 
       {phase === "confirming" ? (
@@ -155,7 +155,7 @@ export function MicInput({
                     key={item.code}
                     className="flex items-center gap-2 text-sm text-ink-800"
                   >
-                    <span aria-hidden="true" className="text-emerald-600">
+                    <span aria-hidden="true" className="text-good-700">
                       ✓
                     </span>
                     {item.label}
@@ -166,7 +166,7 @@ export function MicInput({
           ) : null}
 
           {unmatched ? (
-            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+            <p className="mt-3 rounded-lg border border-warn-200 bg-warn-50 p-2 text-sm text-warn-700">
               Nothing in that phrase matched a known action. Nothing has been
               scored — please choose from the options instead.
             </p>
@@ -204,7 +204,7 @@ export function MicInput({
                 className={`h-11 rounded-lg px-4 text-sm font-semibold ${
                   phase === "listening"
                     ? "bg-rose-600 text-white"
-                    : "border border-ink-200 bg-white text-ink-700"
+                    : "border border-ink-200 bg-surface text-ink-700"
                 }`}
               >
                 {phase === "listening" ? "◼ Stop" : "🎙 Speak"}
@@ -249,7 +249,7 @@ export function MicInput({
               buttons below work exactly the same way.
             </p>
           ) : null}
-          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+          {error ? <p className="text-sm text-bad-700">{error}</p> : null}
         </div>
       )}
     </div>

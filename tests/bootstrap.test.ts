@@ -12,6 +12,7 @@ import {
   clearBootstrapMarker,
   hasBootstrapped,
   planEntryModes,
+  runDailyScheduler,
 } from "@/domain/scheduler";
 import { listActivePanel, listAllPatients } from "@/domain/patients";
 import { setSetting } from "@/domain/profile";
@@ -91,6 +92,33 @@ describe("bootstrapNewUserService", () => {
   it("leaves the rest of the ward free", () => {
     const result = bootstrapNewUserService(ctx.db, { today: TODAY });
     expect(countAvailableInpatientRooms(ctx.db)).toBe(10 - result.patientIds.length);
+  });
+
+  it("stops the daily scheduler from topping up the panel on the same day", () => {
+    // Without this the first day stacks bootstrap *and* a normal scheduler run,
+    // filling the ward on day one instead of easing the learner in.
+    const bootstrapped = bootstrapNewUserService(ctx.db, { today: TODAY });
+    const run = runDailyScheduler(ctx.db, { today: TODAY });
+
+    expect(run.newPatientIds.length).toBe(0);
+    expect(listAllPatients(ctx.db).length).toBe(bootstrapped.patientIds.length);
+    expect(run.debug.blockedReason).toMatch(/starter service was created today/i);
+  });
+
+  it("still schedules a teaching conference on the first day", () => {
+    bootstrapNewUserService(ctx.db, { today: TODAY });
+    const run = runDailyScheduler(ctx.db, { today: TODAY });
+
+    expect(run.lectureId).toBeTruthy();
+  });
+
+  it("resumes normal pacing the next day", () => {
+    bootstrapNewUserService(ctx.db, { today: TODAY });
+    runDailyScheduler(ctx.db, { today: TODAY });
+
+    const tomorrow = "2026-03-03";
+    const next = runDailyScheduler(ctx.db, { today: tomorrow });
+    expect(next.newPatientIds.length).toBeGreaterThan(0);
   });
 
   it("explains itself when there is no published content", () => {

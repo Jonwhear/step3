@@ -207,8 +207,8 @@ export default async function PatientPage({
         ) : null}
 
         {undifferentiated ? (
-          <Card className="mt-4 border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30">
-            <p className="text-sm text-amber-900 dark:text-amber-200">
+          <Card className="mt-4 border-warn-200 bg-warn-50 p-3">
+            <p className="text-sm text-warn-700">
               This patient is waiting in the emergency department. Open
               Admissions to work them up.
             </p>

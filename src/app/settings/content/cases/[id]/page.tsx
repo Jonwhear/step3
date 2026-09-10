@@ -75,21 +75,21 @@ export default async function CaseEditorPage({
           <SectionHeading>Validation</SectionHeading>
           <Card className="p-4">
             {validation.ok && validation.warnings.length === 0 ? (
-              <p className="text-sm text-emerald-700 dark:text-emerald-400">
+              <p className="text-sm text-good-700">
                 No problems found. This case can be published.
               </p>
             ) : null}
 
             {validation.errors.length > 0 ? (
               <div>
-                <p className="text-sm font-medium text-rose-700 dark:text-rose-400">
+                <p className="text-sm font-medium text-bad-700">
                   {validation.errors.length} error
                   {validation.errors.length === 1 ? "" : "s"} — publication is blocked
                 </p>
                 <ul className="mt-2 space-y-1.5">
                   {validation.errors.map((issue, index) => (
                     <li key={index} className="text-sm text-ink-800">
-                      <span className="mr-2 rounded bg-rose-100 px-1 text-[10px] font-semibold uppercase text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      <span className="mr-2 rounded bg-bad-200 px-1 text-[10px] font-semibold uppercase text-bad-700">
                         {issue.code}
                       </span>
                       {issue.message}
@@ -101,14 +101,14 @@ export default async function CaseEditorPage({
 
             {validation.warnings.length > 0 ? (
               <div className={validation.errors.length > 0 ? "mt-4" : ""}>
-                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                <p className="text-sm font-medium text-warn-700">
                   {validation.warnings.length} warning
                   {validation.warnings.length === 1 ? "" : "s"} — publication is allowed
                 </p>
                 <ul className="mt-2 space-y-1.5">
                   {validation.warnings.slice(0, 12).map((issue, index) => (
                     <li key={index} className="text-sm text-ink-600">
-                      <span className="mr-2 rounded bg-amber-100 px-1 text-[10px] font-semibold uppercase text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                      <span className="mr-2 rounded bg-warn-200 px-1 text-[10px] font-semibold uppercase text-warn-700">
                         {issue.code}
                       </span>
                       {issue.message}

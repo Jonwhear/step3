@@ -27,6 +27,7 @@ import {
   listAllPatients,
 } from "@/domain/patients";
 import { getCurrentRotation, getProfile, USER_ID } from "@/domain/profile";
+import { getBootstrapDate } from "./bootstrap";
 import {
   countAvailableInpatientRooms,
   findAvailableRoom,
@@ -154,11 +155,24 @@ function getExistingRun(db: Db, date: IsoDate): t.SchedulerRunRow | null {
   );
 }
 
+/**
+ * Reads back a persisted run.
+ *
+ * This crosses a version boundary — the row may have been written by an earlier
+ * build with a different debug shape — so the essential fields are checked
+ * before the record is handed to a UI that would otherwise crash reading them.
+ * An unrecognisable record reads as "no run", which every caller already
+ * handles.
+ */
 export function getSchedulerDebug(db: Db, date: IsoDate = todayIso()): SchedulerDebug | null {
   const run = getExistingRun(db, date);
   if (!run) return null;
   try {
-    return JSON.parse(run.debugJson) as SchedulerDebug;
+    const parsed = JSON.parse(run.debugJson) as Partial<SchedulerDebug>;
+    if (!parsed?.rotation?.name || !parsed.pacing || !Array.isArray(parsed.candidateScores)) {
+      return null;
+    }
+    return parsed as SchedulerDebug;
   } catch {
     return null;
   }
@@ -277,14 +291,24 @@ export function runDailyScheduler(
     );
   }
 
+  // The starter service was created today by the bootstrap. Adding more on top
+  // of it would fill the ward on day one, so this run assigns nothing — but it
+  // still runs, so the day still gets a teaching conference and a debug record.
+  const bootstrappedToday = getBootstrapDate(db) === today;
+  if (bootstrappedToday) {
+    notes.push(
+      "Your starter service was created today, so no additional patients were assigned. Normal pacing resumes tomorrow.",
+    );
+  }
+
   // First run: guarantee enough of a panel that the learner sees the whole
   // workflow immediately (spec §42) rather than a single handoff patient.
   const isFirstRun = allPatients.length === 0;
   const desired = isFirstRun
     ? Math.max(pacing.dailyTarget, FIRST_RUN_PATIENT_COUNT)
     : pacing.dailyTarget;
-  const newPatientsRequested = Math.min(desired, slots);
-  if (isFirstRun) {
+  const newPatientsRequested = bootstrappedToday ? 0 : Math.min(desired, slots);
+  if (isFirstRun && !bootstrappedToday) {
     notes.push(
       `First run: seeding a starter panel of ${newPatientsRequested} patient(s) so handoff, rounds and admission are all reachable.`,
     );
@@ -427,6 +451,21 @@ export function runDailyScheduler(
   if (lecture.lectureId) markLectureScheduled(db, lecture.lectureId, today);
 
   /* --- 6. Persist the run ------------------------------------------------- */
+  const blockedReason = bootstrappedToday
+    ? "Your starter service was created today; normal pacing resumes tomorrow."
+    : explainNoAssignment({
+        assignedCount: assigned.length,
+        requested: newPatientsRequested,
+        slots,
+        freeRooms,
+        eligibleCount: eligible.length,
+        totalCases: cases.length,
+        dailyTarget: pacing.dailyTarget,
+        remainingPatients: pacing.remainingPatients,
+        censusCap: tuning.effectiveCensusCap,
+        activePanelSize,
+      });
+
   const debug: SchedulerDebug = {
     runDate: today,
     rotation: {
@@ -452,18 +491,7 @@ export function runDailyScheduler(
     availableBeds: freeRooms,
     censusCap: tuning.effectiveCensusCap,
     physicalRoomCap: tuning.physicalRoomCap,
-    blockedReason: explainNoAssignment({
-      assignedCount: assigned.length,
-      requested: newPatientsRequested,
-      slots,
-      freeRooms,
-      eligibleCount: eligible.length,
-      totalCases: cases.length,
-      dailyTarget: pacing.dailyTarget,
-      remainingPatients: pacing.remainingPatients,
-      censusCap: tuning.effectiveCensusCap,
-      activePanelSize,
-    }),
+    blockedReason,
   };
 
   db.insert(t.schedulerRun)

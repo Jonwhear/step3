@@ -59,7 +59,7 @@ export function RotationEditor({ rotations }: { rotations: RotationBlockRow[] })
                       <input type="hidden" name="id" value={rotation.id} />
                       <button
                         type="submit"
-                        className="h-9 rounded-lg border border-ink-200 px-3 text-xs font-medium text-rose-700"
+                        className="h-9 rounded-lg border border-ink-200 px-3 text-xs font-medium text-bad-700"
                       >
                         Delete
                       </button>
@@ -84,7 +84,7 @@ export function RotationEditor({ rotations }: { rotations: RotationBlockRow[] })
           <select
             name="specialty"
             defaultValue="Internal Medicine"
-            className="col-span-2 h-11 rounded-lg border border-ink-200 bg-white px-3 text-sm"
+            className="col-span-2 h-11 rounded-lg border border-ink-200 bg-surface px-3 text-sm"
           >
             {CONTENT_SPECIALTIES.map((s) => (
               <option key={s} value={s}>
@@ -111,7 +111,7 @@ export function RotationEditor({ rotations }: { rotations: RotationBlockRow[] })
             />
           </label>
           {addState.error ? (
-            <p className="col-span-2 text-sm text-rose-700">{addState.error}</p>
+            <p className="col-span-2 text-sm text-bad-700">{addState.error}</p>
           ) : null}
           <button
             type="submit"
@@ -149,7 +149,7 @@ function EditRotationForm({
         <select
           name="specialty"
           defaultValue={rotation.specialty}
-          className="col-span-2 h-11 rounded-lg border border-ink-200 bg-white px-3 text-sm"
+          className="col-span-2 h-11 rounded-lg border border-ink-200 bg-surface px-3 text-sm"
         >
           {CONTENT_SPECIALTIES.map((s) => (
             <option key={s} value={s}>
@@ -172,7 +172,7 @@ function EditRotationForm({
           className="h-11 rounded-lg border border-ink-200 px-2 text-sm"
         />
         {state.error ? (
-          <p className="col-span-2 text-sm text-rose-700">{state.error}</p>
+          <p className="col-span-2 text-sm text-bad-700">{state.error}</p>
         ) : null}
         <button
           type="submit"

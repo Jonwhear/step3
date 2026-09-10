@@ -260,8 +260,8 @@ function FeedbackGroup({
 }) {
   const border =
     tone === "bad"
-      ? "border-rose-200 dark:border-rose-900/50"
-      : "border-amber-200 dark:border-amber-900/50";
+      ? "border-bad-200"
+      : "border-warn-200";
   return (
     <div className={`mt-3 rounded-lg border ${border} p-3`}>
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-600">

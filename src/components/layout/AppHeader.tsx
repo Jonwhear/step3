@@ -9,7 +9,7 @@ export function AppHeader({
   right?: React.ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-20 border-b border-ink-200 bg-white">
+    <header className="sticky top-0 z-20 border-b border-ink-200 bg-surface">
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <Link href="/" className="block truncate text-sm font-semibold text-ink-900">

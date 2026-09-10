@@ -22,7 +22,7 @@ const STATUS_LABEL: Record<RoomView["status"], string> = {
 const STATUS_CLASS: Record<RoomView["status"], string> = {
   EMPTY: "border-dashed border-ink-200 bg-surface-muted",
   OCCUPIED: "border-ink-200 bg-surface",
-  DISCHARGE_PENDING: "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30",
+  DISCHARGE_PENDING: "border-good-200 bg-good-50",
   NEW_PATIENT: "border-clinical-300 bg-clinical-50",
 };
 

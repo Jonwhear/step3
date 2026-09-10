@@ -33,10 +33,10 @@ export function DemoDataControls({ counts }: { counts: Record<string, number> })
       </dl>
 
       {confirming ? (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <p className="text-sm text-amber-900">{CONFIRM_TEXT}</p>
+        <div className="mt-4 rounded-lg border border-warn-200 bg-warn-50 p-3">
+          <p className="text-sm text-warn-700">{CONFIRM_TEXT}</p>
           {confirming === "reset" ? (
-            <p className="mt-2 text-sm text-amber-900">
+            <p className="mt-2 text-sm text-warn-700">
               The synthetic dataset will then be restored from the seed files.
             </p>
           ) : null}
@@ -82,7 +82,7 @@ export function DemoDataControls({ counts }: { counts: Record<string, number> })
             type="button"
             disabled={pending}
             onClick={() => setConfirming("delete")}
-            className="h-11 rounded-lg border border-rose-200 text-sm font-medium text-rose-700 disabled:opacity-50"
+            className="h-11 rounded-lg border border-bad-200 text-sm font-medium text-bad-700 disabled:opacity-50"
           >
             Delete all demo content
           </button>

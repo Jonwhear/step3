@@ -24,6 +24,8 @@ export const SETTINGS_KEYS = {
   catchUpIntensity: "scheduler.catchUpIntensity",
   rotationEmphasis: "scheduler.rotationEmphasis",
   bootstrapCompleted: "onboarding.bootstrapCompleted",
+  /** Date the starter service was created; the scheduler defers to it. */
+  bootstrapDate: "onboarding.bootstrapDate",
 } as const;
 
 export const THEMES = ["system", "light", "dark"] as const;

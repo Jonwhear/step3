@@ -134,7 +134,7 @@ export function HandoffRunner({
         {/* The server re-renders after acceptance, so the confirmation is driven
             by the local set rather than by the (now stale) isNew flag. */}
         {isAccepted ? (
-          <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <p className="mt-4 rounded-lg border border-good-200 bg-good-50 p-3 text-sm text-good-700">
             Accepted. {current.patientName} is on your service and will appear
             on rounds.
           </p>
