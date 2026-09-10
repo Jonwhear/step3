@@ -12,12 +12,21 @@ import { APP_CONFIG } from "@/config/app";
 import { loadDemoContent } from "@/content/demo";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
+import { refreshAllLearningPointStatuses } from "@/domain/content/provenance";
+import { seedHospitalRooms } from "@/domain/rooms";
+import { nowIso } from "@/lib/date";
 
 const DEMO_MARKERS = {
   isDemo: true as const,
   contentOrigin: APP_CONFIG.demo.contentOrigin,
   demoSeedVersion: APP_CONFIG.demo.seedVersion,
 };
+
+/** Everything bundled belongs to this pack (spec §41). */
+export const DEMO_PACK_ID = "pack:general-hospital-demo";
+
+/** Bumped only when the portable pack format changes shape (spec §44). */
+export const CONTENT_PACK_SCHEMA_VERSION = 1;
 
 /** Deterministic ids so re-seeding is stable across runs. */
 const id = (prefix: string, key: string) => `${prefix}:${key}`;
@@ -40,6 +49,9 @@ export interface SeedResult {
 
 export function seedDemoContent(db: Db): SeedResult {
   const content = loadDemoContent();
+  // Cases reference labs by code; resolving up-front turns a typo into a clear
+  // seed-time failure rather than a silently missing result.
+  const labByCode = new Map(content.labDefinitions.map((l) => [l.code, l]));
   const result: SeedResult = {
     concepts: 0,
     actions: 0,
@@ -57,6 +69,65 @@ export function seedDemoContent(db: Db): SeedResult {
   };
 
   db.transaction((tx) => {
+    /* ------------------------- content pack & rooms ------------------------ */
+    // Everything bundled belongs to the builtin pack, so an export of custom
+    // work never accidentally carries the demo library with it.
+    tx.insert(t.contentPack)
+      .values({
+        id: DEMO_PACK_ID,
+        name: "General Hospital Demo Pack",
+        description:
+          "Original synthetic teaching content bundled with the application.",
+        author: APP_CONFIG.hospitalShortName,
+        version: "1.0.0",
+        schemaVersion: CONTENT_PACK_SCHEMA_VERSION,
+        isBuiltin: true,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      })
+      .onConflictDoUpdate({
+        target: t.contentPack.id,
+        set: { schemaVersion: CONTENT_PACK_SCHEMA_VERSION, updatedAt: nowIso() },
+      })
+      .run();
+
+    /* --------------------------- lab definitions --------------------------- */
+    for (const lab of content.labDefinitions) {
+      tx.insert(t.labDefinition)
+        .values({
+          id: id("lab", lab.code),
+          code: lab.code,
+          displayName: lab.displayName,
+          units: lab.units,
+          referenceLow: lab.referenceLow ?? null,
+          referenceHigh: lab.referenceHigh ?? null,
+          referenceText: lab.referenceText ?? null,
+          sexSpecificRangeJson: lab.sexSpecificRange
+            ? JSON.stringify(lab.sexSpecificRange)
+            : null,
+          category: lab.category,
+          displayOrder: lab.displayOrder,
+          ...DEMO_MARKERS,
+        })
+        .onConflictDoUpdate({
+          target: t.labDefinition.id,
+          set: {
+            displayName: lab.displayName,
+            units: lab.units,
+            referenceLow: lab.referenceLow ?? null,
+            referenceHigh: lab.referenceHigh ?? null,
+            referenceText: lab.referenceText ?? null,
+            sexSpecificRangeJson: lab.sexSpecificRange
+              ? JSON.stringify(lab.sexSpecificRange)
+              : null,
+            category: lab.category,
+            displayOrder: lab.displayOrder,
+          },
+        })
+        .run();
+      result.labDefinitions += 1;
+    }
+
     /* ------------------------------- concepts ------------------------------ */
     for (const c of content.concepts) {
       const conceptId = id("concept", c.code);
@@ -128,6 +199,15 @@ export function seedDemoContent(db: Db): SeedResult {
           admissionOpening: c.admissionOpening,
           teachingPoint: c.teachingPoint,
           minimumRoundsBeforeDischarge: c.minimumRoundsBeforeDischarge,
+          patientAgeYears: c.patientAgeYears ?? null,
+          patientSex: c.patientSex ?? null,
+          chiefComplaint: c.chiefComplaint,
+          codeStatus: c.codeStatus,
+          allergies: c.allergies,
+          status: "PUBLISHED",
+          reviewStatus: "REVIEWED",
+          packId: DEMO_PACK_ID,
+          createdBy: "demo-seed",
           ...DEMO_MARKERS,
         })
         .onConflictDoUpdate({
@@ -144,6 +224,13 @@ export function seedDemoContent(db: Db): SeedResult {
             admissionOpening: c.admissionOpening,
             teachingPoint: c.teachingPoint,
             minimumRoundsBeforeDischarge: c.minimumRoundsBeforeDischarge,
+            patientAgeYears: c.patientAgeYears ?? null,
+            patientSex: c.patientSex ?? null,
+            chiefComplaint: c.chiefComplaint,
+            codeStatus: c.codeStatus,
+            allergies: c.allergies,
+            packId: DEMO_PACK_ID,
+            updatedAt: nowIso(),
           },
         })
         .run();
@@ -174,9 +261,103 @@ export function seedDemoContent(db: Db): SeedResult {
             triggerActionCode: f.triggerActionCode ?? null,
             initiallyVisible: f.initiallyVisible,
             displayOrder: index,
+            clinicalRole: f.clinicalRole,
           })
           .run();
         result.findings += 1;
+      });
+
+      /* --- labs, imaging and the problem list --------------------------- */
+      tx.delete(t.caseLabResult).where(eq(t.caseLabResult.caseId, caseId)).run();
+      c.labs.forEach((lab, index) => {
+        const definition = labByCode.get(lab.labCode);
+        if (!definition) {
+          throw new Error(
+            `Case ${c.code} references unknown lab code "${lab.labCode}". Add it to the central lab library.`,
+          );
+        }
+        tx.insert(t.caseLabResult)
+          .values({
+            id: `${caseId}:lab:${index}`,
+            caseId,
+            labDefinitionId: id("lab", lab.labCode),
+            value: lab.value,
+            // Left NORMAL when unset: the display layer derives the real flag
+            // from the central range, so it can never disagree with it.
+            flag: lab.flag ?? "NORMAL",
+            triggerActionCode: lab.triggerActionCode ?? null,
+            collectedLabel: lab.collectedLabel,
+            clinicalRole: lab.clinicalRole,
+            displayOrder: index,
+          })
+          .run();
+        result.labResults += 1;
+      });
+
+      tx.delete(t.caseImagingResult).where(eq(t.caseImagingResult.caseId, caseId)).run();
+      c.imaging.forEach((study, index) => {
+        tx.insert(t.caseImagingResult)
+          .values({
+            id: `${caseId}:imaging:${index}`,
+            caseId,
+            studyName: study.studyName,
+            modality: study.modality,
+            performedLabel: study.performedLabel,
+            impression: study.impression,
+            findingsText: study.findingsText,
+            triggerActionCode: study.triggerActionCode ?? null,
+            imageAssetPath: study.imageAssetPath ?? null,
+            thumbnailAssetPath: study.thumbnailAssetPath ?? null,
+            clinicalRole: study.clinicalRole,
+            displayOrder: index,
+          })
+          .run();
+        result.imagingResults += 1;
+      });
+
+      const problemIds = tx
+        .select({ id: t.caseProblem.id })
+        .from(t.caseProblem)
+        .where(eq(t.caseProblem.caseId, caseId))
+        .all()
+        .map((r) => r.id);
+      if (problemIds.length) {
+        tx.delete(t.caseProblemOption)
+          .where(inArray(t.caseProblemOption.problemId, problemIds))
+          .run();
+      }
+      tx.delete(t.caseProblem).where(eq(t.caseProblem.caseId, caseId)).run();
+
+      c.problems.forEach((problem, pIndex) => {
+        const problemId = `${caseId}:problem:${pIndex}`;
+        tx.insert(t.caseProblem)
+          .values({
+            id: problemId,
+            caseId,
+            label: problem.label,
+            assessmentText: problem.assessmentText,
+            isPrimary: problem.isPrimary,
+            isExpected: problem.isExpected,
+            conceptId: problem.conceptCode ? id("concept", problem.conceptCode) : null,
+            displayOrder: pIndex,
+          })
+          .run();
+        result.problems += 1;
+
+        problem.options.forEach((option, oIndex) => {
+          tx.insert(t.caseProblemOption)
+            .values({
+              id: `${problemId}:option:${oIndex}`,
+              problemId,
+              label: option.label,
+              classification: option.classification,
+              actionCode: option.actionCode ?? null,
+              feedbackText: option.feedbackText,
+              conceptId: option.conceptCode ? id("concept", option.conceptCode) : null,
+              displayOrder: oIndex,
+            })
+            .run();
+        });
       });
 
       for (const r of c.actionRules) {
@@ -211,6 +392,10 @@ export function seedDemoContent(db: Db): SeedResult {
             correctFeedback: p.correctFeedback,
             incorrectFeedback: p.incorrectFeedback,
             conceptId: p.conceptCode ? id("concept", p.conceptCode) : null,
+            whyCorrect: p.whyCorrect,
+            whyOthersWrong: p.whyOthersWrong,
+            caseEvidence: p.caseEvidence,
+            detailedExplanation: p.detailedExplanation,
           })
           .run();
         result.prompts += 1;
@@ -297,7 +482,185 @@ export function seedDemoContent(db: Db): SeedResult {
         result.lectureSections += 1;
       });
     }
+
+    /* --------------------- sources & learning points ---------------------- */
+    for (const source of content.sources) {
+      const sourceId = id("source", source.code);
+      tx.insert(t.contentSource)
+        .values({
+          id: sourceId,
+          sourceType: source.sourceType,
+          title: source.title,
+          sourceIdentifier: source.sourceIdentifier,
+          section: source.section,
+          subsection: source.subsection,
+          notes: source.notes,
+          version: source.version,
+          isDemo: true,
+          packId: DEMO_PACK_ID,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
+        .onConflictDoUpdate({
+          target: t.contentSource.id,
+          set: {
+            title: source.title,
+            sourceIdentifier: source.sourceIdentifier,
+            section: source.section,
+            subsection: source.subsection,
+            notes: source.notes,
+            updatedAt: nowIso(),
+          },
+        })
+        .run();
+
+      source.fragments.forEach((fragment, index) => {
+        tx.insert(t.sourceFragment)
+          .values({
+            id: `frg_${sourceId}_${index}`,
+            contentSourceId: sourceId,
+            fragmentIndex: index,
+            label: fragment.label,
+            rawText: fragment.rawText,
+            normalizedText: fragment.rawText.toLowerCase().replace(/\s+/g, " ").trim(),
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+          })
+          .onConflictDoUpdate({
+            target: t.sourceFragment.id,
+            set: { label: fragment.label, rawText: fragment.rawText, updatedAt: nowIso() },
+          })
+          .run();
+      });
+    }
+
+    for (const point of content.learningPoints) {
+      const pointId = `lp:${point.code}`;
+      const sourceId = point.sourceCode ? id("source", point.sourceCode) : null;
+      tx.insert(t.learningPoint)
+        .values({
+          id: pointId,
+          code: point.code,
+          title: point.title,
+          description: point.description,
+          specialty: point.specialty,
+          topic: point.topic,
+          importance: point.importance,
+          contentSourceId: sourceId,
+          sourceFragmentId:
+            sourceId && point.sourceFragmentIndex !== undefined
+              ? `frg_${sourceId}_${point.sourceFragmentIndex}`
+              : null,
+          status: "UNPROCESSED",
+          reviewStatus: "REVIEWED",
+          canonicalLearningPointId: null,
+          isCanonical: true,
+          packId: DEMO_PACK_ID,
+          isDemo: true,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        })
+        .onConflictDoUpdate({
+          target: t.learningPoint.id,
+          set: {
+            title: point.title,
+            description: point.description,
+            specialty: point.specialty,
+            topic: point.topic,
+            importance: point.importance,
+            contentSourceId: sourceId,
+            updatedAt: nowIso(),
+          },
+        })
+        .run();
+      result.learningPoints += 1;
+
+      // Mappings are rebuilt wholesale so removing a code from a content file
+      // actually removes the claim that the point is covered there.
+      tx.delete(t.learningPointMapping)
+        .where(eq(t.learningPointMapping.learningPointId, pointId))
+        .run();
+
+      for (const caseCode of point.caseCodes) {
+        const caseId = id("case", caseCode);
+        tx.insert(t.learningPointMapping)
+          .values({
+            id: `lpm:${point.code}:case:${caseCode}`,
+            learningPointId: pointId,
+            entityType: "CASE",
+            entityId: caseId,
+            caseId,
+            lectureId: null,
+            notes: "",
+            createdAt: nowIso(),
+          })
+          .onConflictDoNothing()
+          .run();
+
+        // Also record the graded prompts inside that case, which is what turns
+        // "present in a patient" into "actually tested" for the audit.
+        const prompts = tx
+          .select({ id: t.casePrompt.id, conceptId: t.casePrompt.conceptId })
+          .from(t.casePrompt)
+          .where(eq(t.casePrompt.caseId, caseId))
+          .all();
+        for (const prompt of prompts) {
+          tx.insert(t.learningPointMapping)
+            .values({
+              id: `lpm:${point.code}:prompt:${prompt.id}`,
+              learningPointId: pointId,
+              entityType: "CASE_PROMPT",
+              entityId: prompt.id,
+              caseId,
+              lectureId: null,
+              notes: "",
+              createdAt: nowIso(),
+            })
+            .onConflictDoNothing()
+            .run();
+        }
+      }
+
+      for (const lectureCode of point.lectureCodes) {
+        const lectureId = id("lecture", lectureCode);
+        tx.insert(t.learningPointMapping)
+          .values({
+            id: `lpm:${point.code}:lecture:${lectureCode}`,
+            learningPointId: pointId,
+            entityType: "LECTURE",
+            entityId: lectureId,
+            caseId: null,
+            lectureId,
+            notes: "",
+            createdAt: nowIso(),
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+
+      if (sourceId) {
+        tx.insert(t.evidenceLink)
+          .values({
+            id: `ev:${point.code}`,
+            entityType: "LEARNING_POINT",
+            entityId: pointId,
+            contentSourceId: sourceId,
+            sourceFragmentId:
+              point.sourceFragmentIndex !== undefined
+                ? `frg_${sourceId}_${point.sourceFragmentIndex}`
+                : null,
+            notes: "",
+            createdAt: nowIso(),
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+    }
   });
+
+  // Derived from the mappings just written, so status always agrees with them.
+  refreshAllLearningPointStatuses(db);
+  seedHospitalRooms(db);
 
   return result;
 }

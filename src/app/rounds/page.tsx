@@ -7,7 +7,10 @@ import {
   getCasePrompts,
   promptChoices,
 } from "@/domain/cases";
+import { listCaseProblems } from "@/domain/chart";
+import { buildLabPanels } from "@/domain/labs";
 import { getPatient } from "@/domain/patients";
+import { initialsFor } from "@/domain/rooms";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
 import { formatLongDate } from "@/lib/date";
@@ -45,11 +48,29 @@ export default function RoundsPage() {
         template.admissionOpening,
       );
 
+      // Overnight results are part of the bedside picture, so the abnormal
+      // ones are surfaced at the stop rather than only inside the chart.
+      const abnormalLabs = buildLabPanels(database, patient.caseId, {
+        takenActionCodes: null,
+        patientSex: (template.patientSex as "M" | "F" | null) ?? null,
+      })
+        .flatMap((panel) => panel.results)
+        .filter((result) => result.flag !== "NORMAL")
+        .slice(0, 6)
+        .map((result) => ({
+          label: result.displayName,
+          value: result.units ? `${result.value} ${result.units}` : result.value,
+          flag: result.flagLabel,
+        }));
+
       return {
         patientId: patient.id,
         patientName: patient.patientName,
+        initials: initialsFor(patient.patientName),
         roomNumber: patient.roomNumber,
         age: ageMatch?.[0] ?? "",
+        abnormalLabs,
+        hasChart: listCaseProblems(database, patient.caseId).length > 0,
         diagnosis: template.primaryDiagnosis,
         hospitalDay: panelPatient.hospitalDay,
         roundsCompleted: patient.roundsCompleted,

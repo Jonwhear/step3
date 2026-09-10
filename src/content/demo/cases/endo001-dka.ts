@@ -22,6 +22,12 @@ export const CASE_ENDO_001: CaseTemplateInput = {
 
   minimumRoundsBeforeDischarge: 3,
 
+  patientAgeYears: 24,
+  patientSex: "F",
+  chiefComplaint: "Vomiting, abdominal pain and polyuria",
+  codeStatus: "Full code",
+  allergies: "No known drug allergies",
+
   concepts: [
     { code: "ENDO.DKA.01", weight: 1 },
     { code: "ENDO.DKA.02", weight: 1 },
@@ -40,15 +46,90 @@ export const CASE_ENDO_001: CaseTemplateInput = {
     { category: "HISTORY", label: "Chief complaint", value: "One day of vomiting, abdominal pain and polyuria", initiallyVisible: true },
     { category: "HISTORY", label: "Past medical history", value: "Type 1 diabetes diagnosed at age 11. No prior episodes of ketoacidosis.", triggerActionCode: "HX_ADDITIONAL" },
     { category: "HISTORY", label: "Medications", value: "She ran out of insulin four days ago and could not afford a refill.", triggerActionCode: "HX_MEDICATIONS" },
-    { category: "EXAM", label: "General appearance", value: "Dry mucous membranes, deep regular respirations, fruity breath odor, alert", triggerActionCode: "EXAM_GENERAL" },
-    { category: "EXAM", label: "Abdomen", value: "Diffusely tender without guarding or rebound", triggerActionCode: "EXAM_ABDOMEN" },
-    { category: "LAB", label: "Bedside glucose", value: "480", units: "mg/dL", triggerActionCode: "ORDER_GLUCOSE" },
-    { category: "LAB", label: "Basic metabolic panel", value: "Sodium 132, potassium 5.3, chloride 97, bicarbonate 10, anion gap 25, creatinine 1.2, glucose 480", triggerActionCode: "ORDER_BMP" },
-    { category: "LAB", label: "Serum ketones", value: "Strongly positive; beta-hydroxybutyrate 5.8 mmol/L", triggerActionCode: "ORDER_KETONES" },
-    { category: "LAB", label: "Venous blood gas", value: "pH 7.19, pCO2 24", triggerActionCode: "ORDER_ABG" },
-    { category: "LAB", label: "Complete blood count", value: "White count 14.2 without left shift, hemoglobin 14.1", triggerActionCode: "ORDER_CBC" },
-    { category: "LAB", label: "Urinalysis", value: "Large ketones and glucose. No nitrites, no leukocyte esterase.", triggerActionCode: "ORDER_URINALYSIS" },
-    { category: "IMAGING", label: "Chest radiograph", value: "Clear lung fields. No infiltrate.", triggerActionCode: "ORDER_CXR" },
+    { category: "EXAM", label: "General appearance", value: "Dry mucous membranes, deep regular respirations, fruity breath odor, alert", triggerActionCode: "EXAM_GENERAL", clinicalRole: "KEY_POSITIVE" },
+    { category: "EXAM", label: "Abdomen", value: "Diffusely tender without guarding or rebound", triggerActionCode: "EXAM_ABDOMEN", clinicalRole: "DISTRACTOR" },
+    { category: "LAB", label: "Serum ketones", value: "Strongly positive; beta-hydroxybutyrate 5.8 mmol/L", triggerActionCode: "ORDER_KETONES", clinicalRole: "KEY_POSITIVE" },
+  ],
+
+  /*
+   * Structured results. Values only — units, reference ranges and panel
+   * grouping come from the central lab library, and the abnormal flag is
+   * derived from the range rather than being asserted here (spec §14).
+   */
+  labs: [
+    { labCode: "GLU", value: "480", triggerActionCode: "ORDER_GLUCOSE", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "NA", value: "132", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "CONTEXT" },
+    { labCode: "K", value: "5.3", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "CL", value: "97", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival" },
+    { labCode: "HCO3", value: "10", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "ANION_GAP", value: "25", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "CR", value: "1.2", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival" },
+    { labCode: "WBC", value: "14.2", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival", clinicalRole: "DISTRACTOR" },
+    { labCode: "HGB", value: "14.1", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival" },
+    { labCode: "PLT", value: "288", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival" },
+    { labCode: "PH_ART", value: "7.19", triggerActionCode: "ORDER_ABG", collectedLabel: "Venous sample", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "PCO2", value: "24", triggerActionCode: "ORDER_ABG", collectedLabel: "Venous sample", clinicalRole: "CONTEXT" },
+    { labCode: "UA_KETONES", value: "Large", flag: "ABNORMAL", triggerActionCode: "ORDER_URINALYSIS", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "UA_GLUCOSE", value: "Large", flag: "ABNORMAL", triggerActionCode: "ORDER_URINALYSIS", clinicalRole: "CONTEXT" },
+    { labCode: "UA_NITRITE", value: "Negative", triggerActionCode: "ORDER_URINALYSIS", clinicalRole: "KEY_NEGATIVE" },
+    { labCode: "UA_LEUK", value: "Negative", triggerActionCode: "ORDER_URINALYSIS", clinicalRole: "KEY_NEGATIVE" },
+  ],
+
+  imaging: [
+    {
+      studyName: "Chest radiograph, portable AP",
+      modality: "XRAY",
+      performedLabel: "Hospital day 1",
+      impression: "No acute cardiopulmonary abnormality. No infiltrate.",
+      findingsText:
+        "Lung volumes are adequate. The lungs are clear without focal consolidation, effusion or pneumothorax. Cardiomediastinal silhouette is within normal limits.",
+      triggerActionCode: "ORDER_CXR",
+      clinicalRole: "KEY_NEGATIVE",
+    },
+  ],
+
+  /* Assessment & Plan (spec §20-21). Every option is deterministically scored. */
+  problems: [
+    {
+      label: "Diabetic ketoacidosis",
+      assessmentText:
+        "Type 1 diabetic with an anion-gap metabolic acidosis, ketosis and hyperglycaemia precipitated by insulin nonadherence.",
+      isPrimary: true,
+      conceptCode: "ENDO.DKA.01",
+      options: [
+        { label: "IV isotonic fluid resuscitation", classification: "REQUIRED", actionCode: "GIVE_IV_FLUIDS", feedbackText: "Fluids restore perfusion and begin lowering glucose before insulin is introduced.", conceptCode: "ENDO.DKA.02" },
+        { label: "Check potassium before starting insulin", classification: "REQUIRED", actionCode: "GIVE_POTASSIUM", feedbackText: "Insulin drives potassium intracellularly; starting it into an unrecognised deficit can be fatal.", conceptCode: "ENDO.DKA.03" },
+        { label: "IV insulin infusion", classification: "REQUIRED", actionCode: "GIVE_INSULIN", feedbackText: "Insulin stops ketogenesis and closes the gap — after fluids and a potassium check.", conceptCode: "ENDO.DKA.02" },
+        { label: "Hourly glucose and q4h electrolytes", classification: "REQUIRED", feedbackText: "An insulin infusion is only safe with this monitoring cadence." },
+        { label: "Add dextrose when glucose falls below 200 with an open gap", classification: "APPROPRIATE", actionCode: "GIVE_DEXTROSE", feedbackText: "Lets the infusion continue suppressing ketogenesis after the glucose normalises.", conceptCode: "ENDO.DKA.04" },
+        { label: "IV sodium bicarbonate", classification: "UNNECESSARY", feedbackText: "Not indicated at this pH; it does not improve outcomes and may worsen hypokalaemia." },
+        { label: "Subcutaneous sliding-scale insulin alone", classification: "CONTRAINDICATED", feedbackText: "Inadequate for an open anion gap — this patient needs an infusion." },
+      ],
+    },
+    {
+      label: "Hypokalaemia risk / total-body potassium depletion",
+      assessmentText:
+        "Serum potassium of 5.3 reflects extracellular shift, not stores. It will fall rapidly once insulin is running.",
+      conceptCode: "ENDO.DKA.03",
+      options: [
+        { label: "Replete potassium as it falls on the infusion", classification: "REQUIRED", actionCode: "GIVE_POTASSIUM", feedbackText: "Expect the value to drop quickly once insulin reverses the shift.", conceptCode: "ENDO.DKA.03" },
+        { label: "Continuous cardiac monitoring", classification: "APPROPRIATE", feedbackText: "Reasonable while potassium is moving rapidly." },
+        { label: "Withhold all potassium because the serum value is high", classification: "CONTRAINDICATED", feedbackText: "This is the error the case is built around: the serum value is misleading." },
+      ],
+    },
+    {
+      label: "Insulin access / cost-related nonadherence",
+      assessmentText:
+        "The precipitant was running out of insulin she could not afford. Treating the episode without fixing this guarantees readmission.",
+      conceptCode: "ENDO.DKA.06",
+      options: [
+        { label: "Confirm an insulin supply she can actually obtain", classification: "REQUIRED", feedbackText: "The discharge plan has to solve the problem that caused the admission.", conceptCode: "ENDO.DKA.06" },
+        { label: "Social work / pharmacy assistance referral", classification: "REQUIRED", feedbackText: "Cost-related nonadherence is a solvable, concrete barrier." },
+        { label: "Sick-day rules education", classification: "APPROPRIATE", feedbackText: "Reduces the risk of the next episode." },
+        { label: "Endocrinology follow-up within one week", classification: "APPROPRIATE", feedbackText: "Close follow-up after an admission for ketoacidosis." },
+        { label: "Discharge on the same regimen she could not afford", classification: "CONTRAINDICATED", feedbackText: "Guarantees a repeat admission." },
+      ],
+    },
   ],
 
   actionRules: [
@@ -95,8 +176,16 @@ export const CASE_ENDO_001: CaseTemplateInput = {
         { key: "c", text: "Intravenous sodium bicarbonate" },
         { key: "d", text: "Subcutaneous long-acting insulin alone" },
       ], correctKey: "a" },
-      correctFeedback: "Correct. Fluids restore perfusion and begin lowering glucose before insulin is introduced.",
-      incorrectFeedback: "Insulin before fluid and a potassium check risks profound hypokalemia and worsening hypotension. Fluids come first.",
+      correctFeedback: "Fluids restore perfusion and begin lowering glucose before insulin is introduced.",
+      incorrectFeedback: "Insulin before fluid and a potassium check risks profound hypokalemia and worsening hypotension.",
+      whyCorrect:
+        "These patients are several litres down from osmotic diuresis and vomiting. Restoring intravascular volume improves renal perfusion, which clears glucose and ketones on its own, and it prevents the abrupt drop in blood pressure that follows when insulin shifts fluid intracellularly.",
+      caseEvidence:
+        "Heart rate 118, blood pressure 104/64, dry mucous membranes and a day of vomiting with polyuria — all point to significant volume depletion.",
+      whyOthersWrong:
+        "An immediate insulin bolus drives potassium into cells before you know the true deficit and worsens hypotension. Bicarbonate does not improve outcomes at this pH. Subcutaneous long-acting insulin alone cannot close an open anion gap.",
+      detailedExplanation:
+        "The order in ketoacidosis is fluids, then a potassium check, then insulin. Each step exists to make the next one safe.",
       conceptCode: "ENDO.DKA.02",
     },
     {
@@ -123,8 +212,16 @@ export const CASE_ENDO_001: CaseTemplateInput = {
         { key: "c", text: "The kidney actively retains potassium during ketoacidosis" },
         { key: "d", text: "Potassium binds to ketone bodies and is measured twice" },
       ], correctKey: "a" },
-      correctFeedback: "Correct. Serum potassium reports distribution, not total-body stores. Insulin reverses the shift and unmasks the deficit.",
-      incorrectFeedback: "Potassium has moved out of cells while the osmotic diuresis has been dumping it in the urine for days. The serum value is misleading.",
+      correctFeedback: "Serum potassium reports distribution, not total-body stores.",
+      incorrectFeedback: "Potassium has moved out of cells while the osmotic diuresis has been wasting it in the urine for days.",
+      whyCorrect:
+        "Two processes run in parallel. Acidosis and insulin deficiency move potassium from the intracellular to the extracellular space, which raises the measured value. Meanwhile the osmotic diuresis has been excreting potassium for days, depleting total-body stores. The serum number reflects only the first process.",
+      caseEvidence:
+        "Potassium 5.3 with a bicarbonate of 10 and an anion gap of 25, after a day of polyuria and vomiting.",
+      whyOthersWrong:
+        "Haemolysis would be a sporadic pre-analytic artefact, not a consistent feature of ketoacidosis. The kidney is wasting potassium here, not retaining it. Potassium does not bind ketone bodies.",
+      detailedExplanation:
+        "This is why insulin is withheld until potassium is known to be above roughly 3.3: starting it reverses the shift and can unmask a profound deficit within an hour.",
       conceptCode: "ENDO.DKA.03",
     },
     {

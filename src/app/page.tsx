@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { APP_CONFIG } from "@/config/app";
-import { Card, EmptyState, SectionHeading } from "@/components/ui";
+import { INPATIENT_UNIT } from "@/config/hospital";
+import { Card, SectionHeading } from "@/components/ui";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
+import { FloorMap } from "@/components/hospital/FloorMap";
 import { PatientCard } from "@/components/patient/PatientCard";
 import { buildProgressSummary } from "@/domain/progress";
 import { loadDailySession } from "@/server/session";
@@ -133,11 +135,24 @@ export default function HomePage() {
             {session.panel.length === 1 ? "" : "s"}
           </SectionHeading>
 
-          {session.panel.length === 0 ? (
-            <EmptyState
-              title="No patients on service"
-              body="The overnight team has not signed anyone out yet. Check Handoff, or add demo content in Settings if the library is empty."
-            />
+          {session.emptyServiceReason ? (
+            // Spec §66: never an unexplained empty service.
+            <Card className="p-6 text-center">
+              <p className="text-sm font-medium text-ink-800">
+                {session.emptyServiceReason.title}
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">
+                {session.emptyServiceReason.body}
+              </p>
+              {session.emptyServiceReason.action ? (
+                <Link
+                  href={session.emptyServiceReason.action.href}
+                  className="mt-4 inline-flex h-11 items-center rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700"
+                >
+                  {session.emptyServiceReason.action.label}
+                </Link>
+              ) : null}
+            </Card>
           ) : (
             <div className="space-y-2">
               {session.panel.map((patient) => (
@@ -146,6 +161,13 @@ export default function HomePage() {
             </div>
           )}
         </section>
+
+        {/* --- hospital census map ----------------------------------------- */}
+        {session.floor.length > 0 ? (
+          <section className="mt-6">
+            <FloorMap rooms={session.floor} unitLabel={`${INPATIENT_UNIT} — census`} />
+          </section>
+        ) : null}
 
         {/* --- subtle progress -------------------------------------------- */}
         <section className="mt-6">

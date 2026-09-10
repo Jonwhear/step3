@@ -1,9 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { inArray } from "drizzle-orm";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
-import { Badge, Card, SectionHeading, type Tone } from "@/components/ui";
+import { Badge, Card, EmptyState, SectionHeading, type Tone } from "@/components/ui";
+import {
+  ChartTabs,
+  parseChartTab,
+  type ChartTab,
+} from "@/components/emr/ChartTabs";
+import { ImagingList } from "@/components/emr/ImagingReport";
+import { LabPanels } from "@/components/emr/LabPanels";
+import { PatientHeader } from "@/components/emr/PatientHeader";
 import { listActions } from "@/domain/actions";
+import { buildChart } from "@/domain/chart";
 import {
   getCaseById,
   getCaseConceptIds,
@@ -11,18 +21,22 @@ import {
   getCasePrompts,
   promptChoices,
 } from "@/domain/cases";
+import { buildImagingViews, buildLabPanels } from "@/domain/labs";
 import {
   getPatient,
   hospitalDay,
   listPatientActions,
   listPromptResponses,
   listRevealedFindingIds,
+  listStudyEventsForPatient,
 } from "@/domain/patients";
 import { getAudioPreferences } from "@/domain/profile";
+import { getPreferences } from "@/domain/settings";
+import { resolvePatientVisual } from "@/lib/assets";
 import { db } from "@/server/db";
 import { formatShortDate } from "@/lib/date";
 import * as schema from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { AssessmentPlan } from "./AssessmentPlan";
 import { DischargeFlow } from "./DischargeFlow";
 
 export const dynamic = "force-dynamic";
@@ -39,19 +53,31 @@ const CATEGORY_LABEL: Record<string, string> = {
   HISTORY: "History",
   EXAM: "Examination",
   VITAL: "Vital signs",
-  LAB: "Laboratory",
-  IMAGING: "Imaging",
+  LAB: "Laboratory (narrative)",
+  IMAGING: "Imaging (narrative)",
   ECG: "ECG",
   OTHER: "Other studies",
+};
+
+const STATE_BADGE: Record<string, { label: string; tone: Tone }> = {
+  PENDING_HANDOFF: { label: "Handoff", tone: "info" },
+  PENDING_ADMISSION: { label: "Admission", tone: "warn" },
+  ON_SERVICE: { label: "On service", tone: "neutral" },
+  DISCHARGE_ELIGIBLE: { label: "Discharge ready", tone: "good" },
+  DISCHARGED: { label: "Discharged", tone: "neutral" },
+  ARCHIVED: { label: "Archived", tone: "neutral" },
 };
 
 /** Patient chart. Active patients see only what they have uncovered (spec §56). */
 export default async function PatientPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const { tab: requestedTab } = await searchParams;
   const database = db();
   const patient = getPatient(database, id);
   if (!patient) notFound();
@@ -60,14 +86,28 @@ export default async function PatientPage({
   if (!template) notFound();
 
   const isDischarged = patient.state === "DISCHARGED" || patient.state === "ARCHIVED";
+  const undifferentiated = patient.state === "PENDING_ADMISSION";
+  const prefs = getPreferences(database);
+
   const revealedIds = new Set(listRevealedFindingIds(database, patient.id));
   const allFindings = getCaseFindings(database, patient.caseId);
+  const taken = listPatientActions(database, patient.id);
+  const takenCodes = new Set(taken.map((a) => a.actionCode));
 
-  // A discharged patient becomes a full case review; an active one shows only
-  // what the learner has legitimately encountered.
+  // A discharged patient becomes a full case review (spec §25); an active one
+  // shows only what the learner has legitimately encountered.
   const visibleFindings = isDischarged
     ? allFindings
     : allFindings.filter((f) => f.initiallyVisible || revealedIds.has(f.id));
+
+  // Handoff patients arrive with their story told, so their results are known.
+  const unlockedFor = isDischarged || patient.entryMode === "HANDOFF" ? null : takenCodes;
+  const labPanels = buildLabPanels(database, patient.caseId, {
+    takenActionCodes: unlockedFor,
+    patientSex: (template.patientSex as "M" | "F" | null) ?? null,
+  });
+  const imaging = buildImagingViews(database, patient.caseId, unlockedFor);
+  const chart = buildChart(database, patient.id, patient.caseId);
 
   const groups = Object.entries(
     visibleFindings.reduce<Record<string, typeof visibleFindings>>((acc, finding) => {
@@ -77,8 +117,8 @@ export default async function PatientPage({
   );
 
   const actionDefs = new Map(listActions(database).map((a) => [a.actionCode, a]));
-  const taken = listPatientActions(database, patient.id);
   const responses = listPromptResponses(database, patient.id);
+  const events = listStudyEventsForPatient(database, patient.id);
 
   const conceptIds = getCaseConceptIds(database, patient.caseId);
   const concepts = conceptIds.length
@@ -106,37 +146,44 @@ export default async function PatientPage({
     responses.filter((r) => r.stage === "DISCHARGE").map((r) => r.promptId),
   );
   const pendingDischargePrompt = dischargePrompts.find((p) => !answeredDischarge.has(p.id));
-
   const correctCount = responses.filter((r) => r.correct).length;
+
+  // Only offer tabs that actually have something behind them (spec §52).
+  const available: ChartTab[] = ["summary"];
+  if (!undifferentiated) available.push("handoff");
+  if (labPanels.length > 0 || imaging.length > 0 || groups.length > 0) available.push("results");
+  if (chart.length > 0) available.push("chart");
+  if (responses.length > 0 || taken.length > 0) available.push("rounds");
+  if (events.length > 0) available.push("course");
+
+  const tab = parseChartTab(requestedTab, available);
+
+  const visual = resolvePatientVisual({ patientName: patient.patientName });
 
   return (
     <>
       <AppHeader rotationName="Patient chart" />
+
+      <PatientHeader
+        visual={visual}
+        name={patient.patientName}
+        ageYears={template.patientAgeYears}
+        sex={template.patientSex}
+        roomNumber={patient.roomNumber}
+        hospitalDay={hospitalDay(patient)}
+        diagnosis={undifferentiated ? null : template.primaryDiagnosis}
+        allergies={undifferentiated ? undefined : template.allergies}
+        codeStatus={undifferentiated ? undefined : template.codeStatus}
+        status={STATE_BADGE[patient.state] ?? null}
+      />
+      <ChartTabs patientId={patient.id} active={tab} available={available} />
+
       <PageShell>
         <Link href="/" className="text-xs font-medium text-clinical-600">
           ‹ Back to service
         </Link>
 
-        <Card className="mt-3 p-4">
-          <p className="text-xs uppercase tracking-[0.12em] text-ink-500">
-            Room {patient.roomNumber}
-          </p>
-          <h1 className="mt-1 text-lg font-semibold text-ink-900">{patient.patientName}</h1>
-          <p className="mt-0.5 text-sm text-ink-600">
-            {patient.state === "PENDING_ADMISSION"
-              ? "Undifferentiated — pending admission workup"
-              : template.primaryDiagnosis}
-          </p>
-          <p className="mt-1 text-xs text-ink-400">
-            Hospital day {hospitalDay(patient)} · entered via{" "}
-            {patient.entryMode === "HANDOFF" ? "handoff" : "admission"} ·{" "}
-            {patient.roundsCompleted} round{patient.roundsCompleted === 1 ? "" : "s"}
-            {isDischarged && patient.dischargedAt
-              ? ` · discharged ${formatShortDate(patient.dischargedAt.slice(0, 10))}`
-              : ""}
-          </p>
-        </Card>
-
+        {/* --- state-specific calls to action ----------------------------- */}
         {patient.state === "DISCHARGE_ELIGIBLE" ? (
           <section className="mt-4">
             <SectionHeading>Discharge</SectionHeading>
@@ -159,161 +206,248 @@ export default async function PatientPage({
           </section>
         ) : null}
 
-        {patient.state === "PENDING_ADMISSION" ? (
-          <section className="mt-4">
-            <Card className="border-amber-200 bg-amber-50 p-3">
-              <p className="text-sm text-amber-900">
-                This patient is waiting in the emergency department. Open
-                Admissions to work them up.
-              </p>
-              <Link
-                href="/admissions"
-                className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
-              >
-                Go to admission
-              </Link>
-            </Card>
-          </section>
+        {undifferentiated ? (
+          <Card className="mt-4 border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30">
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              This patient is waiting in the emergency department. Open
+              Admissions to work them up.
+            </p>
+            <Link
+              href="/admissions"
+              className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
+            >
+              Go to admission
+            </Link>
+          </Card>
         ) : null}
 
         {patient.state === "PENDING_HANDOFF" ? (
-          <section className="mt-4">
-            <Card className="border-clinical-200 bg-clinical-50 p-3">
-              <p className="text-sm text-clinical-700">
-                This patient is on the handoff list and has not been accepted
-                yet.
-              </p>
-              <Link
-                href="/handoff"
-                className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
-              >
-                Go to handoff
-              </Link>
-            </Card>
-          </section>
-        ) : null}
-
-        {patient.state !== "PENDING_ADMISSION" ? (
-          <section className="mt-6">
-            <SectionHeading>Handoff</SectionHeading>
-            <Card className="p-4">
-              <p className="text-sm leading-relaxed text-ink-800">
-                {template.handoffScript}
-              </p>
-            </Card>
-          </section>
-        ) : null}
-
-        <section className="mt-6">
-          <SectionHeading>Presentation</SectionHeading>
-          <Card className="p-4">
-            <p className="text-sm leading-relaxed text-ink-800">
-              {template.admissionOpening}
+          <Card className="mt-4 border-clinical-200 bg-clinical-50 p-3">
+            <p className="text-sm text-clinical-700">
+              This patient is on the handoff list and has not been accepted yet.
             </p>
+            <Link
+              href="/handoff"
+              className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
+            >
+              Go to handoff
+            </Link>
           </Card>
-        </section>
-
-        {groups.map(([category, findings]) => (
-          <section key={category} className="mt-6">
-            <SectionHeading>{CATEGORY_LABEL[category] ?? category}</SectionHeading>
-            <Card className="divide-y divide-ink-100">
-              {findings.map((finding) => (
-                <div key={finding.id} className="flex justify-between gap-4 px-4 py-2.5">
-                  <span className="text-sm text-ink-600">{finding.label}</span>
-                  <span className="text-right text-sm text-ink-900">
-                    {finding.value}
-                    {finding.units ? ` ${finding.units}` : ""}
-                    {finding.referenceRange ? (
-                      <span className="ml-2 text-xs text-ink-400">
-                        ({finding.referenceRange})
-                      </span>
-                    ) : null}
-                  </span>
-                </div>
-              ))}
-            </Card>
-          </section>
-        ))}
-
-        {taken.length > 0 ? (
-          <section className="mt-6">
-            <SectionHeading>Actions taken</SectionHeading>
-            <Card className="divide-y divide-ink-100">
-              {taken.map((action) => (
-                <div key={action.id} className="p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-medium text-ink-800">
-                      {actionDefs.get(action.actionCode)?.displayName ?? action.actionCode}
-                    </p>
-                    <Badge tone={CLASSIFICATION_TONE[action.classification] ?? "neutral"}>
-                      {action.classification}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-ink-600">{action.resultText}</p>
-                </div>
-              ))}
-            </Card>
-          </section>
         ) : null}
 
-        {responses.length > 0 ? (
-          <section className="mt-6">
-            <SectionHeading>
-              Study performance — {correctCount}/{responses.length} correct
-            </SectionHeading>
-            <Card className="divide-y divide-ink-100">
-              {responses.map((response) => {
-                const prompt = promptsById.get(response.promptId);
-                return (
-                  <div key={response.id} className="p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm text-ink-800">
-                        {prompt?.promptText ?? "Question"}
-                      </p>
-                      <Badge tone={response.correct ? "good" : "warn"}>
-                        {response.correct ? "Correct" : "Missed"}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-ink-400">
-                      {response.stage.toLowerCase()} ·{" "}
-                      {formatShortDate(response.createdAt.slice(0, 10))}
-                    </p>
-                  </div>
-                );
-              })}
-            </Card>
-          </section>
-        ) : null}
+        {/* ------------------------------ summary -------------------------- */}
+        {tab === "summary" ? (
+          <div className="mt-4 space-y-4">
+            <section>
+              <SectionHeading>Presentation</SectionHeading>
+              <Card className="p-4">
+                {template.chiefComplaint ? (
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+                    Chief complaint — {template.chiefComplaint}
+                  </p>
+                ) : null}
+                <p className="text-sm leading-relaxed text-ink-800">
+                  {template.admissionOpening}
+                </p>
+              </Card>
+            </section>
 
-        {concepts.length > 0 ? (
-          <section className="mt-6">
-            <SectionHeading>Concepts encountered</SectionHeading>
-            <Card className="divide-y divide-ink-100">
-              {concepts.map((concept) => {
-                const state = conceptStates.get(concept.id);
-                return (
-                  <div key={concept.id} className="flex justify-between gap-4 px-4 py-2.5">
-                    <span className="min-w-0 text-sm text-ink-700">
-                      <span className="block truncate">{concept.name}</span>
-                      <span className="block text-xs text-ink-400">{concept.code}</span>
-                    </span>
-                    <span className="shrink-0 text-right text-xs text-ink-500">
-                      Mastery {state?.masteryLevel ?? 0}/5
-                      {state?.nextDueAt ? (
-                        <span className="block text-ink-400">
-                          due {formatShortDate(state.nextDueAt)}
+            {concepts.length > 0 ? (
+              <section>
+                <SectionHeading>Concepts encountered</SectionHeading>
+                <Card className="divide-y divide-ink-100">
+                  {concepts.map((concept) => {
+                    const state = conceptStates.get(concept.id);
+                    return (
+                      <div
+                        key={concept.id}
+                        className="flex justify-between gap-4 px-4 py-2.5"
+                      >
+                        <span className="min-w-0 text-sm text-ink-700">
+                          <span className="block truncate">{concept.name}</span>
+                          <span className="block text-xs text-ink-400">{concept.code}</span>
                         </span>
-                      ) : null}
+                        <span className="shrink-0 text-right text-xs text-ink-500">
+                          Mastery {state?.masteryLevel ?? 0}/5
+                          {state?.nextDueAt ? (
+                            <span className="block text-ink-400">
+                              due {formatShortDate(state.nextDueAt)}
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </Card>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* ------------------------------ handoff -------------------------- */}
+        {tab === "handoff" ? (
+          <div className="mt-4 space-y-4">
+            <section>
+              <SectionHeading>Sign-out</SectionHeading>
+              <Card className="p-4">
+                <p className="text-sm leading-relaxed text-ink-800">
+                  {template.handoffScript}
+                </p>
+              </Card>
+            </section>
+            {template.teachingPoint ? (
+              <section>
+                <SectionHeading>Teaching point</SectionHeading>
+                <Card className="border-clinical-200 bg-clinical-50 p-4">
+                  <p className="text-sm leading-relaxed text-clinical-700">
+                    {template.teachingPoint}
+                  </p>
+                </Card>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* ------------------------------ results -------------------------- */}
+        {tab === "results" ? (
+          <div className="mt-4 space-y-5">
+            <LabPanels
+              panels={labPanels}
+              showReferenceRanges={prefs.labs.showReferenceRanges}
+            />
+
+            {imaging.length > 0 ? (
+              <section>
+                <SectionHeading>Imaging</SectionHeading>
+                <ImagingList studies={imaging} />
+              </section>
+            ) : null}
+
+            {groups.map(([category, findings]) => (
+              <section key={category}>
+                <SectionHeading>{CATEGORY_LABEL[category] ?? category}</SectionHeading>
+                <Card className="divide-y divide-ink-100">
+                  {findings.map((finding) => (
+                    <div key={finding.id} className="flex justify-between gap-4 px-4 py-2.5">
+                      <span className="text-sm text-ink-600">{finding.label}</span>
+                      <span className="text-right text-sm text-ink-900">
+                        {finding.value}
+                        {finding.units ? ` ${finding.units}` : ""}
+                        {finding.referenceRange && prefs.labs.showReferenceRanges ? (
+                          <span className="ml-2 text-xs text-ink-400">
+                            ({finding.referenceRange})
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                </Card>
+              </section>
+            ))}
+          </div>
+        ) : null}
+
+        {/* ------------------------------- chart --------------------------- */}
+        {tab === "chart" ? (
+          <div className="mt-4">
+            <SectionHeading>Assessment &amp; plan</SectionHeading>
+            <AssessmentPlan
+              patientId={patient.id}
+              problems={chart.map((problem) => ({
+                id: problem.id,
+                label: problem.label,
+                assessmentText: problem.assessmentText,
+                isPrimary: problem.isPrimary,
+                added: problem.added,
+                options: problem.options.map((o) => ({
+                  id: o.id,
+                  label: o.label,
+                  selected: o.selected,
+                })),
+              }))}
+              readOnly={isDischarged}
+            />
+          </div>
+        ) : null}
+
+        {/* ------------------------------- rounds -------------------------- */}
+        {tab === "rounds" ? (
+          <div className="mt-4 space-y-4">
+            {taken.length > 0 ? (
+              <section>
+                <SectionHeading>Orders and actions</SectionHeading>
+                <Card className="divide-y divide-ink-100">
+                  {taken.map((action) => (
+                    <div key={action.id} className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm font-medium text-ink-800">
+                          {actionDefs.get(action.actionCode)?.displayName ?? action.actionCode}
+                        </p>
+                        <Badge tone={CLASSIFICATION_TONE[action.classification] ?? "neutral"}>
+                          {action.classification}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-ink-600">{action.resultText}</p>
+                    </div>
+                  ))}
+                </Card>
+              </section>
+            ) : null}
+
+            {responses.length > 0 ? (
+              <section>
+                <SectionHeading>
+                  Study performance — {correctCount}/{responses.length} correct
+                </SectionHeading>
+                <Card className="divide-y divide-ink-100">
+                  {responses.map((response) => {
+                    const prompt = promptsById.get(response.promptId);
+                    return (
+                      <div key={response.id} className="p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm text-ink-800">
+                            {prompt?.promptText ?? "Question"}
+                          </p>
+                          <Badge tone={response.correct ? "good" : "warn"}>
+                            {response.correct ? "Correct" : "Missed"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-ink-400">
+                          {response.stage.toLowerCase()} ·{" "}
+                          {formatShortDate(response.createdAt.slice(0, 10))}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </Card>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* --------------------------- hospital course --------------------- */}
+        {tab === "course" ? (
+          <div className="mt-4">
+            <SectionHeading>Hospital course</SectionHeading>
+            {events.length === 0 ? (
+              <EmptyState title="Nothing recorded yet" />
+            ) : (
+              <Card className="divide-y divide-ink-100">
+                {events.map((event) => (
+                  <div key={event.id} className="flex justify-between gap-4 px-4 py-2">
+                    <span className="text-sm text-ink-700">
+                      {event.eventType.replace(/_/g, " ").toLowerCase()}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-ink-400">
+                      {formatShortDate(event.eventDate)}
                     </span>
                   </div>
-                );
-              })}
-            </Card>
-          </section>
+                ))}
+              </Card>
+            )}
+          </div>
         ) : null}
       </PageShell>
     </>
   );
 }
-
-void eq;

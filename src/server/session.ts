@@ -11,7 +11,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import type { Db } from "@/db/client";
-import { getCaseById } from "@/domain/cases";
+import { getCaseById, listCases } from "@/domain/cases";
 import type { PatientState } from "@/domain/constants";
 import { getLecture, type LectureView } from "@/domain/lectures";
 import {
@@ -30,7 +30,13 @@ import {
   type AudioPreferences,
   type CurrentRotation,
 } from "@/domain/profile";
-import { daysSinceLastSchedulerRun, runDailyScheduler } from "@/domain/scheduler";
+import { buildFloorMap, type RoomView } from "@/domain/rooms";
+import {
+  bootstrapNewUserService,
+  daysSinceLastSchedulerRun,
+  getSchedulerDebug,
+  runDailyScheduler,
+} from "@/domain/scheduler";
 import { db } from "@/server/db";
 import { todayIso, type IsoDate } from "@/lib/date";
 import type * as t from "@/db/schema";
@@ -67,6 +73,55 @@ export interface DailySession {
   lecture: LectureView | null;
   /** Days away since the last scheduler run, for the neutral welcome message. */
   daysAway: number | null;
+  /** Inpatient floor, in room order, for the census map (spec §28). */
+  floor: RoomView[];
+  /**
+   * Why the service is empty, when it is. Never null-and-silent: spec §66
+   * requires the app to say why there is no work rather than showing a blank
+   * screen the learner has to interpret.
+   */
+  emptyServiceReason: EmptyServiceReason | null;
+}
+
+export interface EmptyServiceReason {
+  title: string;
+  body: string;
+  /** A concrete next step, when one exists. */
+  action: { label: string; href: string } | null;
+}
+
+/**
+ * Turns the scheduler's own diagnosis into learner-facing wording. The
+ * scheduler already recorded exactly which constraint bound; this only decides
+ * how to say it.
+ */
+function describeEmptyService(
+  database: Db,
+  today: IsoDate,
+  hasContent: boolean,
+): EmptyServiceReason {
+  if (!hasContent) {
+    return {
+      title: "No clinical content is loaded",
+      body: "The content library is empty, so no patients can be assigned. Seed the demo library or import a content pack.",
+      action: { label: "Open content library", href: "/settings/content" },
+    };
+  }
+
+  const debug = getSchedulerDebug(database, today);
+  if (debug?.blockedReason) {
+    return {
+      title: "No patients are currently assigned",
+      body: debug.blockedReason,
+      action: { label: "Open scheduler inspector", href: "/settings/developer" },
+    };
+  }
+
+  return {
+    title: "Your census is clear",
+    body: "Every patient has been discharged and no new admissions are scheduled for today. Your next assignment arrives with tomorrow's scheduler run.",
+    action: { label: "Open teaching conference", href: "/conference" },
+  };
 }
 
 function toPanelPatient(
@@ -106,14 +161,20 @@ export function loadDailySession(): DailySession {
 
   const daysAway = daysSinceLastSchedulerRun(database, today);
 
-  // Safe to call on every page load: it no-ops if it already ran today.
-  if (onboarded) runDailyScheduler(database, { today });
+  if (onboarded) {
+    // A profile created before the bootstrap existed still needs its marker
+    // settled; the call is a no-op once it has run (spec §35).
+    bootstrapNewUserService(database, { today });
+    // Safe to call on every page load: it no-ops if it already ran today.
+    runDailyScheduler(database, { today });
+  }
 
   const decorate = (rows: t.PatientInstanceRow[]) =>
     rows.map((row) => toPanelPatient(row, getCaseById(database, row.caseId), today));
 
   const panel = decorate(listActivePanel(database));
   const lectureId = getScheduledLectureId(database, today);
+  const hasContent = listCases(database).length > 0;
 
   return {
     today,
@@ -128,6 +189,11 @@ export function loadDailySession(): DailySession {
     dischargeReady: decorate(listByState(database, "DISCHARGE_ELIGIBLE")),
     lecture: lectureId ? getLecture(database, lectureId) : null,
     daysAway,
+    floor: onboarded ? buildFloorMap(database, { today }) : [],
+    emptyServiceReason:
+      onboarded && panel.length === 0
+        ? describeEmptyService(database, today, hasContent)
+        : null,
   };
 }
 

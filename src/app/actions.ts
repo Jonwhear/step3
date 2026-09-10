@@ -22,6 +22,14 @@ import {
   gradePromptResponse,
   resolveAction,
 } from "@/domain/cases";
+import {
+  addProblem,
+  buildChart,
+  removeProblem,
+  renderPlanAsNote,
+  scorePlan,
+  togglePlanSelection,
+} from "@/domain/chart";
 import { describeEvidence } from "@/domain/content/provenance";
 import { completeLecture, getLectureConceptIds, startLecture } from "@/domain/lectures";
 import { introduceConcepts, updateConceptMastery } from "@/domain/mastery";
@@ -471,6 +479,99 @@ export async function interpretForCaseAction(
   return {
     matched: result.matched.map((m) => ({ code: m.actionCode, label: m.displayName })),
     unmatched: result.unmatched,
+  };
+}
+
+/* ---------------------------- assessment & plan --------------------------- */
+
+export async function addProblemAction(formData: FormData): Promise<void> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const problemId = String(formData.get("problemId") ?? "");
+  if (!patientId || !problemId) return;
+  addProblem(db(), patientId, problemId);
+  revalidateAll();
+}
+
+export async function removeProblemAction(formData: FormData): Promise<void> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const problemId = String(formData.get("problemId") ?? "");
+  if (!patientId || !problemId) return;
+  removeProblem(db(), patientId, problemId);
+  revalidateAll();
+}
+
+export async function togglePlanSelectionAction(formData: FormData): Promise<void> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const problemId = String(formData.get("problemId") ?? "");
+  const optionId = String(formData.get("optionId") ?? "");
+  if (!patientId || !problemId || !optionId) return;
+  togglePlanSelection(db(), patientId, problemId, optionId);
+  revalidateAll();
+}
+
+export interface PlanSignState {
+  status: "idle" | "signed";
+  score?: number;
+  maxScore?: number;
+  requiredSelected?: number;
+  requiredTotal?: number;
+  missedRequired?: { problemLabel: string; optionLabel: string; feedbackText: string }[];
+  harmful?: { problemLabel: string; optionLabel: string; feedbackText: string }[];
+  missedProblems?: string[];
+  note?: string;
+  error?: string;
+}
+
+/**
+ * Signs the plan: this is the moment it is graded. Selections themselves are
+ * free to change until now, so an unfinished plan is never penalised.
+ */
+export async function signPlanAction(
+  _prev: PlanSignState,
+  formData: FormData,
+): Promise<PlanSignState> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const database = db();
+  const patient = getPatient(database, patientId);
+  if (!patient) return { status: "idle", error: "Patient not found." };
+
+  const score = scorePlan(database, patient.id, patient.caseId);
+  const today = todayIso();
+
+  recordStudyEvent(database, {
+    eventType: "PLAN_SIGNED",
+    patientInstanceId: patient.id,
+    caseId: patient.caseId,
+    metadata: {
+      score: score.score,
+      maxScore: score.maxScore,
+      requiredSelected: score.requiredSelected,
+      requiredTotal: score.requiredTotal,
+      harmfulCount: score.harmful.length,
+    },
+    date: today,
+  });
+  touchPatient(database, patient, today);
+  revalidateAll();
+
+  return {
+    status: "signed",
+    score: score.score,
+    maxScore: score.maxScore,
+    requiredSelected: score.requiredSelected,
+    requiredTotal: score.requiredTotal,
+    missedRequired: score.missedRequired.map((l) => ({
+      problemLabel: l.problemLabel,
+      optionLabel: l.optionLabel,
+      feedbackText: l.feedbackText,
+    })),
+    harmful: score.harmful.map((l) => ({
+      problemLabel: l.problemLabel,
+      optionLabel: l.optionLabel,
+      feedbackText: l.feedbackText,
+    })),
+    missedProblems: score.missedProblems,
+    note: renderPlanAsNote(buildChart(database, patient.id, patient.caseId)),
   };
 }
 

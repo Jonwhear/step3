@@ -4,14 +4,18 @@
  * Rounds: one patient at a time, bedside data then a single prompt.
  */
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge, Card, EmptyState } from "@/components/ui";
+import { Avatar } from "@/components/patient/Avatar";
 import { PromptCard, type PromptView } from "@/components/patient/PromptCard";
+import { resolvePatientVisual } from "@/lib/assets";
 
 export interface RoundsStop {
   patientId: string;
   patientName: string;
+  initials: string;
   roomNumber: string;
   age: string;
   diagnosis: string;
@@ -19,6 +23,9 @@ export interface RoundsStop {
   roundsCompleted: number;
   minimumRounds: number;
   vitals: { label: string; value: string }[];
+  /** Overnight results worth looking at before answering (spec §23). */
+  abnormalLabs: { label: string; value: string; flag: string }[];
+  hasChart: boolean;
   prompt: PromptView | null;
 }
 
@@ -71,15 +78,28 @@ export function RoundsRunner({
       </div>
 
       <Card className="p-4">
-        <p className="text-xs uppercase tracking-[0.12em] text-ink-500">
-          Room {stop.roomNumber}
-        </p>
-        <p className="mt-1 text-base font-semibold text-ink-900">
-          {stop.patientName}
-          {stop.age ? <span className="font-normal text-ink-500">, {stop.age}</span> : null}
-        </p>
-        <p className="mt-0.5 text-sm text-ink-600">{stop.diagnosis}</p>
-        <p className="mt-0.5 text-xs text-ink-400">Hospital day {stop.hospitalDay}</p>
+        <div className="flex items-start gap-3">
+          <Avatar
+            visual={resolvePatientVisual({
+              patientName: stop.patientName,
+              fallbackInitials: stop.initials,
+            })}
+            size="md"
+          />
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.12em] text-ink-500">
+              Room {stop.roomNumber}
+            </p>
+            <p className="mt-0.5 text-base font-semibold text-ink-900">
+              {stop.patientName}
+              {stop.age ? (
+                <span className="font-normal text-ink-500">, {stop.age}</span>
+              ) : null}
+            </p>
+            <p className="mt-0.5 text-sm text-ink-600">{stop.diagnosis}</p>
+            <p className="mt-0.5 text-xs text-ink-400">Hospital day {stop.hospitalDay}</p>
+          </div>
+        </div>
 
         {stop.vitals.length > 0 ? (
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-ink-100 pt-3 sm:grid-cols-3">
@@ -91,6 +111,46 @@ export function RoundsRunner({
             ))}
           </dl>
         ) : null}
+
+        {stop.abnormalLabs.length > 0 ? (
+          <div className="mt-3 border-t border-ink-100 pt-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+              Abnormal results
+            </p>
+            <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {stop.abnormalLabs.map((lab) => (
+                <li key={lab.label} className="text-sm text-ink-800">
+                  {lab.label}{" "}
+                  <span className="font-medium tabular-nums text-amber-700 dark:text-amber-400">
+                    {lab.value}
+                  </span>{" "}
+                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                    {lab.flag}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {/* Rounds are increasingly a chart review rather than a standalone
+            quiz (spec §23), so the chart is one tap away at every stop. */}
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-ink-100 pt-3">
+          <Link
+            href={`/patients/${stop.patientId}?tab=results`}
+            className="inline-flex h-9 items-center rounded-lg border border-ink-200 px-3 text-xs font-medium text-ink-700"
+          >
+            Review results
+          </Link>
+          {stop.hasChart ? (
+            <Link
+              href={`/patients/${stop.patientId}?tab=chart`}
+              className="inline-flex h-9 items-center rounded-lg border border-ink-200 px-3 text-xs font-medium text-ink-700"
+            >
+              Assessment &amp; plan
+            </Link>
+          ) : null}
+        </div>
       </Card>
 
       {stop.prompt ? (

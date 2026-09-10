@@ -110,6 +110,7 @@ export const STUDY_EVENT_TYPES = [
   "LECTURE_STARTED",
   "LECTURE_COMPLETED",
   "PATIENT_ASSIGNED",
+  "PLAN_SIGNED",
 ] as const;
 export type StudyEventType = (typeof STUDY_EVENT_TYPES)[number];
 

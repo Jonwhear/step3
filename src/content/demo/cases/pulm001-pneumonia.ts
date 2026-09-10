@@ -22,6 +22,12 @@ export const CASE_PULM_001: CaseTemplateInput = {
 
   minimumRoundsBeforeDischarge: 2,
 
+  patientAgeYears: 72,
+  patientSex: "F",
+  chiefComplaint: "Fever, productive cough and shortness of breath",
+  codeStatus: "Full code",
+  allergies: "No known drug allergies",
+
   concepts: [
     { code: "PULM.CAP.01", weight: 1 },
     { code: "PULM.CAP.02", weight: 1 },
@@ -41,11 +47,74 @@ export const CASE_PULM_001: CaseTemplateInput = {
     { category: "HISTORY", label: "Vaccination history", value: "No pneumococcal or influenza vaccination in the past five years.", triggerActionCode: "HX_SOCIAL" },
     { category: "EXAM", label: "Cardiopulmonary", value: "Bronchial breath sounds and crackles at the right base with dullness to percussion", triggerActionCode: "EXAM_CARDIOPULMONARY" },
     { category: "EXAM", label: "General appearance", value: "Alert and oriented, mildly tachypneic, no accessory muscle use", triggerActionCode: "EXAM_GENERAL" },
-    { category: "IMAGING", label: "Chest radiograph", value: "Dense right lower lobe consolidation. No pleural effusion.", triggerActionCode: "ORDER_CXR" },
-    { category: "LAB", label: "Complete blood count", value: "White count 16.4 with left shift, hemoglobin 12.8, platelets 310", triggerActionCode: "ORDER_CBC" },
-    { category: "LAB", label: "Basic metabolic panel", value: "Sodium 136, creatinine 1.0, blood urea nitrogen 22, glucose 108", triggerActionCode: "ORDER_BMP" },
-    { category: "LAB", label: "Blood cultures", value: "Two sets drawn before antibiotics; no growth at 48 hours", triggerActionCode: "ORDER_BLOOD_CULTURES" },
-    { category: "LAB", label: "Serum lactate", value: "1.6", units: "mmol/L", referenceRange: "<2.0", triggerActionCode: "ORDER_LACTATE" },
+    { category: "LAB", label: "Blood cultures", value: "Two sets drawn before antibiotics; no growth at 48 hours", triggerActionCode: "ORDER_BLOOD_CULTURES", clinicalRole: "KEY_NEGATIVE" },
+  ],
+
+  labs: [
+    { labCode: "WBC", value: "16.4", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "NEUT_PCT", value: "84", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+    { labCode: "HGB", value: "12.8", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival" },
+    { labCode: "PLT", value: "310", triggerActionCode: "ORDER_CBC", collectedLabel: "On arrival" },
+    { labCode: "NA", value: "136", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival" },
+    { labCode: "K", value: "4.1", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival" },
+    { labCode: "BUN", value: "22", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "CONTEXT" },
+    { labCode: "CR", value: "1.0", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "KEY_NEGATIVE" },
+    { labCode: "GLU", value: "108", triggerActionCode: "ORDER_BMP", collectedLabel: "On arrival", clinicalRole: "DISTRACTOR" },
+    { labCode: "LACTATE", value: "1.6", triggerActionCode: "ORDER_LACTATE", collectedLabel: "On arrival", clinicalRole: "KEY_NEGATIVE" },
+  ],
+
+  imaging: [
+    {
+      studyName: "Chest radiograph, PA and lateral",
+      modality: "XRAY",
+      performedLabel: "Emergency department, on arrival",
+      impression:
+        "Dense right lower lobe consolidation consistent with pneumonia. No pleural effusion or pneumothorax.",
+      findingsText:
+        "There is dense airspace consolidation in the right lower lobe with air bronchograms. The left lung is clear. No pleural effusion. Cardiomediastinal silhouette is normal in size and contour. No pneumothorax.",
+      triggerActionCode: "ORDER_CXR",
+      clinicalRole: "KEY_POSITIVE",
+    },
+  ],
+
+  problems: [
+    {
+      label: "Community-acquired pneumonia",
+      assessmentText:
+        "72-year-old with fever, productive cough, hypoxaemia and a right lower lobe consolidation. CURB-65 supports inpatient management.",
+      isPrimary: true,
+      conceptCode: "PULM.CAP.01",
+      options: [
+        { label: "Blood cultures before antibiotics", classification: "REQUIRED", actionCode: "ORDER_BLOOD_CULTURES", feedbackText: "Drawn first when it does not delay therapy." },
+        { label: "Empiric ceftriaxone plus azithromycin", classification: "REQUIRED", actionCode: "GIVE_ANTIBIOTICS", feedbackText: "Standard inpatient, non-ICU coverage including atypicals." },
+        { label: "Chest radiograph", classification: "REQUIRED", actionCode: "ORDER_CXR", feedbackText: "Confirms the diagnosis and defines the extent." },
+        { label: "Supplemental oxygen to maintain saturation above 92%", classification: "REQUIRED", feedbackText: "She was 88% on room air on arrival." },
+        { label: "Assess severity to set the site of care", classification: "REQUIRED", feedbackText: "Severity scoring is what decides ward versus ICU versus home." },
+        { label: "Serum lactate", classification: "APPROPRIATE", actionCode: "ORDER_LACTATE", feedbackText: "Reasonable given fever and tachycardia." },
+        { label: "Switch to oral therapy once clinically stable and afebrile", classification: "APPROPRIATE", feedbackText: "Stability, not a fixed number of intravenous days, drives the switch." },
+        { label: "Routine CT chest", classification: "UNNECESSARY", feedbackText: "The radiograph already answered the question." },
+        { label: "Antipseudomonal and MRSA coverage", classification: "UNNECESSARY", feedbackText: "No risk factors here; broadening adds toxicity without benefit." },
+        { label: "Discharge home on arrival", classification: "CONTRAINDICATED", feedbackText: "She was hypoxaemic at 88% on room air." },
+      ],
+    },
+    {
+      label: "Hypoxaemic respiratory failure",
+      assessmentText: "Requiring two litres by nasal cannula, improving.",
+      options: [
+        { label: "Titrate oxygen and trial room air when stable", classification: "REQUIRED", feedbackText: "Coming off oxygen is one of the discharge criteria." },
+        { label: "Continuous pulse oximetry", classification: "APPROPRIATE", feedbackText: "Reasonable while still oxygen-dependent." },
+        { label: "Intubation now", classification: "CONTRAINDICATED", feedbackText: "She is speaking in full sentences on low-flow oxygen." },
+      ],
+    },
+    {
+      label: "Preventive care",
+      assessmentText: "Admission is an opportunity to close vaccination gaps before discharge.",
+      options: [
+        { label: "Pneumococcal vaccination per age-based schedule", classification: "REQUIRED", feedbackText: "Frequently missed, and the admission is the opportunity." },
+        { label: "Influenza vaccination if in season", classification: "APPROPRIATE", feedbackText: "Same reasoning." },
+        { label: "Defer all vaccination to primary care", classification: "UNNECESSARY", feedbackText: "This is how these get missed entirely." },
+      ],
+    },
   ],
 
   actionRules: [

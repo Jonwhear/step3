@@ -193,6 +193,25 @@ export function countAvailableInpatientRooms(db: Db): number {
   return listInpatientRooms(db).filter((r) => !occupancy.has(r.id)).length;
 }
 
+/**
+ * Sorts patients into walking order — ascending room number (spec §30).
+ *
+ * Ordering by the room's `displayOrder` rather than by the room number string
+ * keeps ED bays ("ED 2", "TRAUMA 1") in their laid-out order too, where a
+ * lexicographic sort would scatter them.
+ */
+export function sortByRoomOrder<T extends { roomId: string | null; roomNumber: string }>(
+  db: Db,
+  patients: readonly T[],
+): T[] {
+  const order = new Map(listRooms(db).map((room) => [room.id, room.displayOrder]));
+  return [...patients].sort((a, b) => {
+    const aOrder = a.roomId ? (order.get(a.roomId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    const bOrder = b.roomId ? (order.get(b.roomId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    return aOrder - bOrder || a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
+  });
+}
+
 /** Frees the room a patient is holding. Called on discharge. */
 export function releaseRoom(db: Db, patientId: string): void {
   db.update(t.patientInstance)

@@ -16,6 +16,7 @@ import {
   type StudyEventType,
 } from "@/domain/constants";
 import { USER_ID } from "@/domain/profile";
+import { sortByRoomOrder } from "@/domain/rooms";
 import { nowIso, todayIso, type IsoDate } from "@/lib/date";
 
 /* ------------------------------- study events ----------------------------- */
@@ -129,13 +130,17 @@ export function listAllPatients(db: Db): t.PatientInstanceRow[] {
     .all();
 }
 
-/** Patients on service whose rounds encounter has not happened today. */
+/**
+ * Patients on service whose rounds encounter has not happened today, in
+ * walking order: lowest occupied room first (spec §30).
+ */
 export function listRoundsDue(db: Db, today: IsoDate = todayIso()): t.PatientInstanceRow[] {
-  return listActivePanel(db).filter(
+  const due = listActivePanel(db).filter(
     (p) =>
       (p.state === "ON_SERVICE" || p.state === "DISCHARGE_ELIGIBLE") &&
       p.lastRoundsDate !== today,
   );
+  return sortByRoomOrder(db, due);
 }
 
 export function countActivePanel(db: Db): number {
