@@ -14,21 +14,27 @@ authored data or explicit code.
 
 ## 1. What this is
 
-A working MVP whose purpose is to prove the educational model works:
-
-- case-centric learning rather than a question bank
-- a simulated hospital service with a **persistent patient panel**
-- morning handoff, rounds, active admissions, discharge
-- scheduled teaching conferences
-- deterministic spaced repetition
-- rotation-aware scheduling
-- audio-first interaction with optional voice input
-- progress that survives restarts
-
 The learner sees patients. The concepts, mastery levels and spaced-repetition
 queues exist underneath and surface only on the Progress and Developer screens.
 
-## 2. Current MVP scope
+- case-centric learning rather than a question bank
+- a simulated hospital service with a **persistent patient panel** in real
+  rooms on a real floor
+- morning handoff, rounds, active admissions, assessment & plan, discharge
+- an EMR-shaped chart: patient header, grouped laboratory panels with
+  reference ranges, radiology reports
+- scheduled teaching conferences with navigable, headed sections
+- deterministic spaced repetition and rotation-aware scheduling
+- audio that never starts on its own
+- progress that survives restarts
+
+**V2 additionally solves the content-scale problem.** Consolidating a large
+body of source questions into a smaller number of clinically coherent patients
+is only safe if you can prove nothing was lost. So the whole pipeline —
+source → fragment → learning point → the specific case interaction that tests
+it — is stored in the database and auditable, rather than inferred. See §11d.
+
+## 2. Current scope
 
 Implemented:
 
@@ -36,15 +42,27 @@ Implemented:
 |---|---|
 | Onboarding, profile, rotation schedule | ✅ |
 | Deterministic scheduler with debug inspector | ✅ |
+| First-day service bootstrap | ✅ |
 | Morning handoff (audio-first, accept-to-panel) | ✅ |
 | Rounds with deterministic prompts and mastery updates | ✅ |
 | Active admission with a controlled action vocabulary | ✅ |
 | Discharge interaction and patient history | ✅ |
-| Teaching conference with section-by-section TTS | ✅ |
+| Teaching conference with headed sections and click-to-jump TTS | ✅ |
 | Progress dashboard with specialty/topic drill-down | ✅ |
-| 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions | ✅ |
+| Hospital geography: rooms 401–410, floor map, room-order rounds | ✅ |
+| EMR chart: patient header, tabs, grouped labs, imaging reports | ✅ |
+| Central laboratory reference library + reference-range toggle | ✅ |
+| Problem-based Assessment & Plan with deterministic scoring | ✅ |
+| Content provenance: sources → fragments → learning points → cases | ✅ |
+| Content coverage audit with drill-down | ✅ |
+| Case validation engine gating publication | ✅ |
+| Content library and case editor | ✅ |
+| Portable, versioned content packs with migration adapters | ✅ |
+| Dark mode, font size, density, accent | ✅ |
+| Scheduler preferences (workload, census, catch-up, rotation emphasis) | ✅ |
+| 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (65) | ✅ |
+| Automated tests (185) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -82,18 +100,24 @@ mutation goes through a Server Action so nothing is graded on the client.
 src/
   app/                 routes + server actions
     onboarding/ handoff/ rounds/ admissions/ conference/
-    patients/ progress/ settings/developer/
-  components/          layout, patient, audio, speech, ui
+    patients/[id]/     tabbed EMR chart + assessment & plan
+    progress/ settings/
+    settings/content/  content library, case editor, coverage audit, packs
+    settings/developer/
+  components/          layout, patient, audio, emr, hospital, lecture, speech, ui
   domain/              the actual logic, framework-free
-    scheduler/         pacing.ts, scoring.ts, entryMode.ts, index.ts
+    scheduler/         pacing.ts, scoring.ts, entryMode.ts, bootstrap.ts, index.ts
+    content/           provenance.ts, validation.ts, cases.ts, packs.ts
     cases/ patients/ mastery/ lectures/ actions/ progress/ profile/
+    rooms/ labs/ chart/ settings/
   db/                  schema.ts, client.ts, migrations/, seed/, scripts/
   content/
     schema.ts          Zod schemas for all authored content
-    demo/              cases/, concepts/, lectures/, actions/
-  lib/                 date/, seededRandom/, audio/, speech/
-  config/              app.ts, scheduler.ts   ← all tuning lives here
-tests/                 scheduler, case engine, mastery, persistence
+    labs/              central laboratory reference library
+    demo/              cases/, concepts/, lectures/, actions/, sources/, learningPoints/
+  lib/                 date/, seededRandom/, audio/, speech/, assets/
+  config/              app.ts, scheduler.ts, hospital.ts  ← all tuning lives here
+tests/                 13 suites — see §15
 ```
 
 ### Layer rules
@@ -144,6 +168,25 @@ npm install && npm run setup && npm run dev
 The database file defaults to `./data/step3.sqlite`. Override with
 `STEP3_DB_PATH`.
 
+Finish onboarding and you land on a service immediately — two handoff patients
+and one active admission, in rooms on Floor 4, plus that day's teaching
+conference. Normal pacing starts the following day.
+
+### Where to look first
+
+| Screen | Path |
+|---|---|
+| Service, with the floor map | `/` |
+| Patient chart (Summary · Handoff · Results · Chart · Rounds · Course) | `/patients/<id>` |
+| EMR labs and imaging | `/patients/<id>?tab=results` |
+| Assessment & Plan | `/patients/<id>?tab=chart` |
+| Content library and case editor | `/settings/content` |
+| Content coverage audit | `/settings/content/coverage` |
+| Import / export content packs | `/settings/content/packs` |
+| Scheduler, room and audio diagnostics | `/settings/developer` |
+
+The DKA and pneumonia patients are the ones with full EMR data — see §13.
+
 ### All commands
 
 | Command | Purpose |
@@ -170,6 +213,24 @@ npm run db:migrate
 
 Migrations also run lazily on first request in the app (`src/server/db.ts`), so
 a fresh clone works even if you forget the manual step.
+
+### Upgrade discipline
+
+**"Delete the database and recreate" is not an upgrade strategy here.** The
+learner's profile, panel, mastery state and study history are the point of the
+application, and they are not reproducible.
+
+- `0000_init` is V1. `0001_v2_emr_and_content` is V2 and is **purely additive**:
+  `CREATE TABLE` and `ALTER TABLE … ADD COLUMN` only, zero `DROP` statements.
+  New columns carry defaults that make existing rows correct — a V1
+  `patient_instance` becomes `location_type = 'INPATIENT'` with a null room
+  (backfilled at runtime), and a V1 `case_template` becomes `PUBLISHED`,
+  because a V1 case was by definition live content.
+- `tests/migrations.test.ts` builds a database at the V1 schema, fills it with
+  real user data, runs the migration chain and asserts both the row counts and
+  the individual field values survive. Keep that test passing.
+- Adding a column to an existing table is safe. Renaming or dropping one is
+  not, and needs a data-preserving migration written by hand.
 
 ## 7. Demo seed data
 
@@ -288,7 +349,80 @@ Add an entry to `src/content/demo/lectures/index.ts`:
 ```
 
 Sections matter: the audio player reads them individually so the learner can
-pause, repeat a section, or let it auto-advance. Aim for 3–7 minutes total.
+pause, repeat a section, or jump to one. Aim for 3–7 minutes total.
+
+### Headed sections (preferred for new lectures)
+
+Supplying `sections` overrides `audioScript` and gives the lecture real
+headings in the contents list instead of "Part 1", "Part 2":
+
+```ts
+sections: [
+  {
+    heading: "Recognition",
+    body:
+      "Deep, regular respirations with a fruity breath odour point toward ketosis.\n" +
+      "- Check a bedside **glucose** immediately\n" +
+      "- Send a metabolic panel for the anion gap",
+  },
+  { heading: "Management", body: "…" },
+]
+```
+
+`body` accepts a constrained markdown subset — paragraphs, `- ` bullets and
+`**bold**` — and nothing else. It is rendered twice: once for the screen, and
+once as plain text for speech, so markup is never read aloud.
+
+## 10a. How to add laboratory results and imaging to a case
+
+Labs reference the central library by code and supply only a value:
+
+```ts
+labs: [
+  { labCode: "K", value: "5.3", triggerActionCode: "ORDER_BMP",
+    collectedLabel: "On arrival", clinicalRole: "KEY_POSITIVE" },
+],
+imaging: [
+  {
+    studyName: "Chest radiograph, portable AP",
+    modality: "XRAY",
+    impression: "No acute cardiopulmonary abnormality.",
+    findingsText: "…",
+    triggerActionCode: "ORDER_CXR",
+    clinicalRole: "KEY_NEGATIVE",
+  },
+],
+```
+
+- `labCode` must exist in `src/content/labs/index.ts`, or seeding fails loudly
+  with the case code and the bad code.
+- Omit `flag` and it is derived from the reference range. Set it only where
+  "abnormal" is not a numeric comparison.
+- `triggerActionCode` gates the result behind an order, exactly like findings.
+- `clinicalRole` (`KEY_POSITIVE` / `KEY_NEGATIVE` / `CONTEXT` / `DISTRACTOR`)
+  is authoring metadata for validation and case review. It is **never** shown
+  to the learner — a labelled distractor would stop being a distractor.
+
+Add a problem list to make the case work in the Assessment & Plan tab:
+
+```ts
+problems: [
+  {
+    label: "Diabetic ketoacidosis",
+    assessmentText: "…",
+    isPrimary: true,
+    options: [
+      { label: "IV isotonic fluid resuscitation", classification: "REQUIRED",
+        actionCode: "GIVE_IV_FLUIDS", feedbackText: "…" },
+      { label: "Subcutaneous sliding-scale insulin alone",
+        classification: "CONTRAINDICATED", feedbackText: "…" },
+    ],
+  },
+],
+```
+
+After editing any content file, run `npm run db:reset-demo`, then open
+**Settings → Advanced → Content library** and check the case validates.
 
 ## 11. Scheduler explanation
 
@@ -385,7 +519,187 @@ Correct: `+1` level (max 5). Incorrect: `−1` level (floor 1 once introduced)
 **and back tomorrow regardless of level**. This is a transparent MVP model, not
 a claim about psychometrics — all values live in `config/scheduler.ts`.
 
+## 11a. Hospital geography and census
+
+The hospital is a small, declarative 2D schematic — not a simulation.
+`config/hospital.ts` defines the layout: inpatient rooms 401–410 on Floor 4,
+plus ED bays, trauma bays, boarding and hallway slots reserved for a future ED
+flow.
+
+**Occupancy is derived, never stored twice.** A room is occupied when an active
+patient row points at it (`patient_instance.room_id`). That makes
+double-booking impossible to represent, and discharging a patient frees their
+bed with no separate bookkeeping step that could be missed.
+
+- Room assignment is deterministic: the lowest free room wins. No jitter.
+- Rounds walk in ascending room order (`sortByRoomOrder`).
+- The effective census cap is `min(physical rooms, your census preference)`.
+  When the scheduler declines to assign, the developer inspector names which of
+  the two constraints bound.
+- Patients created before the map existed are backfilled by
+  `reconcilePatientRooms`, matching on the old free-text room number where the
+  room is free.
+
+Patient thumbnails render as initials today. `patient_visual` already carries
+`asset_type` / `asset_path`, and `lib/assets/index.ts` is the single resolver,
+so attaching generated headshots later is a change in one place.
+
+## 11b. Laboratory and imaging
+
+Reference ranges live in **one** place: `content/labs/index.ts`, seeded into
+`lab_definition`. A case supplies only a *value*; units, range, panel grouping
+and display order come from the library.
+
+The abnormal flag is **derived** from the range rather than asserted per case,
+so a case can never drift out of agreement with its own reference range. An
+author can still override the flag for analytes where "abnormal" is not a
+numeric comparison (`Large`, `Positive`).
+
+Sex-specific ranges are supported where the difference changes the flag
+(haemoglobin, haematocrit).
+
+**The reference-range preference is display-only.** Turning ranges off never
+hides an abnormal flag — the flag is the clinically load-bearing part. There is
+a test for exactly this.
+
+Imaging renders as a radiology report: study and time, then IMPRESSION, then
+FINDINGS. `image_asset_path` exists and is null everywhere; when an image is
+attached the component already renders it.
+
+## 11c. Assessment & Plan
+
+The learner builds a note by selecting from case-authored options rather than
+typing prose. This is a deliberate constraint: it keeps the app free of
+free-text clinical interpretation, keeps scoring deterministic, and still
+exercises the real decision — which problems exist and what belongs under each.
+
+- Problems are added from the case's own list; expected problems the learner
+  never adds are reported at signing.
+- Plan options carry the same classifications as admission actions
+  (`REQUIRED` … `CONTRAINDICATED`) and are scored with the same weights.
+- **Grading happens on Sign, not on each tick**, so a half-built plan carries
+  no penalty and can be revised freely.
+- `renderPlanAsNote` produces the note-like text shown back to the learner.
+
+## 11d. Content provenance and the coverage audit
+
+This is the part of V2 that exists to make *content scale safely*.
+
+Consolidating a large body of source questions into a smaller number of
+clinically coherent patients is only safe if you can prove nothing was dropped.
+So the pipeline is **stored, not inferred**:
+
+```
+ContentSource  →  SourceFragment  →  LearningPoint  →  mapping  →  case / lecture
+```
+
+Every step persists in the database. Nothing depends on a model remembering an
+earlier batch, which is what makes incremental ingestion safe: fragment 400 can
+be processed months after fragment 1 with no loss of context.
+
+**Status is derived from mappings, not asserted:**
+
+| Status | Meaning |
+|---|---|
+| `UNPROCESSED` | extracted but mapped nowhere |
+| `PARTIALLY_MAPPED` | attached to a case, but nothing actually tests it |
+| `FULLY_MAPPED` | reachable through a prompt, action rule, plan option or lecture |
+| `EXCLUDED` | deliberately out of scope, or merged into a canonical point |
+
+The distinction between the middle two matters: being *present in a patient* is
+not the same as being *tested*, and conflating them is precisely how content
+disappears during consolidation.
+
+**Settings → Advanced → Content coverage audit** answers, for every learning
+point: where did this come from, which patients test it, which lectures teach
+it, and has a human reviewed it. The bundled demo library deliberately ships
+four unmapped points (hyperkalaemia and cirrhosis) so the audit has something
+real to report — an audit that always says 100% teaches you nothing.
+
+Duplicate handling (`canonical_learning_point_id`, `is_canonical`) is modelled
+and `mergeLearningPoint` re-points a duplicate's mappings at the canonical
+point. Merging is deliberately manual; no automatic semantic merging is done.
+
+`EvidenceLink` ties any structured claim back to the source that supports it,
+and graded prompts surface those citations under **Source** in their feedback.
+
+## 11e. Case validation and publication
+
+`domain/content/validation.ts` runs against the **database**, not against an
+authoring object, so it catches the failures that only appear once content is
+stored: a prompt referencing a deleted concept, a lab code no longer in the
+library, a trigger action that does not exist, a choice-type prompt whose
+correct key matches nothing.
+
+- **Errors block publication.** Only `PUBLISHED` cases reach a learner.
+- **Warnings do not.** Refusing to publish over "this action has no feedback"
+  would make the editor hostile to normal iterative work.
+
+Running this over the bundled library during development found a real defect —
+a plan option referencing an action code that did not exist — which is the
+point of having it.
+
+Bundled demo cases are **read-only**. Editing one requires *Duplicate and edit*,
+so re-seeding the demo library can never destroy authored work. Deletion is
+soft (archive) by default; permanent deletion is refused for any case with
+study history, because `StudyEvent` rows reference the case id.
+
+## 11f. Portable content packs
+
+The application is the engine; a pack is a portable library of patients.
+
+```json
+{
+  "manifest": {
+    "format": "general-hospital-content-pack",
+    "schemaVersion": 2,
+    "packId": "custom-neuro-pack",
+    "name": "Custom Neurology Pack",
+    "version": "1.0.0",
+    "author": "..."
+  },
+  "content": { "concepts": [], "cases": [], "lectures": [], ... }
+}
+```
+
+Two rules matter more than the format itself:
+
+1. **Every pack declares `schemaVersion`.** Once a version ships it is never
+   silently reinterpreted. Older packs are brought forward by explicit
+   migration adapters (`migratePackToCurrent`), applied in sequence, so adding
+   a future version means writing one more step rather than revisiting the ones
+   before it. A pack from a *newer* build is refused with an explanation rather
+   than partially imported.
+2. **Import is never blind.** Inspect → summary → confirm. The inspect step
+   writes nothing; the confirm step is a single transaction, so a malformed
+   pack cannot leave a half-imported library behind.
+
+Imported cases arrive as `DRAFT` / `UNREVIEWED` regardless of what they claimed
+elsewhere: publishing is a decision made in *this* installation.
+
 ## 12. Voice and TTS: browser limitations
+
+**Audio never starts on its own.** Every screen opens `STOPPED` and silent;
+playback begins only when the learner presses Play. There is deliberately no
+"read aloud automatically" preference. The transitions live in a pure reducer
+(`lib/audio/machine.ts`) that the component drives, so the state machine is
+testable without a browser:
+
+```
+STOPPED + Play    → PLAYING     PLAYING + Pause  → PAUSED
+PAUSED  + Play    → PLAYING (resume, not re-speak)
+any     + Stop    → STOPPED     any + Restart    → re-speaks current section
+select while playing → jump there and keep playing
+select while paused/stopped → move the cursor and wait for Play
+navigation / new patient → STOPPED
+```
+
+Lecture bodies use a small markdown subset for the screen and are rendered
+*separately* for speech (`renderSectionForSpeech`), so markup is never read
+aloud. A conservative abbreviation dictionary expands unambiguous forms
+(`IV` → "intravenous") and spells out letter abbreviations (`CBC` → "C B C");
+ambiguous forms are deliberately absent, because guessing is worse than leaving
+the letters alone.
 
 **Text-to-speech** uses `window.speechSynthesis` only — no external provider.
 
@@ -410,8 +724,38 @@ strictly optional. Where it exists:
 Where it does not exist, typing and buttons do exactly the same job. Chromium
 browsers generally support recognition; Firefox generally does not.
 
-## 13. Known MVP limitations
+## 13. Known limitations
 
+Stated plainly, because knowing where the edges are is more useful than a
+feature list.
+
+- **Only two bundled cases carry structured labs, imaging and a problem list.**
+  Diabetic ketoacidosis (`DEMO-ENDO-001`) and community-acquired pneumonia
+  (`DEMO-PULM-001`) exercise the full EMR chart. The other eighteen still use
+  V1's narrative `findings`, which render in the Results tab under
+  "Laboratory (narrative)". Upgrading them is content authoring, not
+  engineering: add `labs`, `imaging` and `problems` to the case file, following
+  either of those two as the template.
+- **Lecture sections are auto-derived for eighteen of twenty lectures.** The
+  `LectureSection` model, click-to-jump TTS and constrained-markdown rendering
+  are complete, but most bundled lectures still supply the flat `audioScript`
+  array, so their sections show as "Part 1", "Part 2". Adding a `sections`
+  array with real headings to a lecture file upgrades it.
+- **The case editor edits case *basics* only.** Findings, prompts, action
+  rules, labs and problems are shown read-only with counts; they are authored
+  in content files or imported through a pack. The validation, status, review,
+  duplicate and delete workflows around them are complete.
+- **Pack export covers cases and their concepts.** Lectures, actions, lab
+  definitions, sources and learning points are modelled in the format and
+  imported correctly, but `exportPack` currently emits them as empty
+  collections.
+- **The ED map is modelled but not surfaced.** ED, trauma, boarding and hallway
+  rooms are seeded and `buildFloorMap` accepts a unit, but only the inpatient
+  floor has a screen. Patient location (`location_type`) exists so an
+  ED → admitted → inpatient flow can be added cleanly.
+- **Learning-point extraction is manual.** The storage, fragmenting, mapping,
+  provenance and audit machinery is complete and tested; deriving learning
+  points from a fragment is authoring work, by design (spec §71).
 - **Single user, single device.** One profile row, no authentication, local
   SQLite. Not multi-user safe.
 - **Cases do not vary.** One `CaseTemplate` produces one `PatientInstance` at a
@@ -432,13 +776,31 @@ browsers generally support recognition; Firefox generally does not.
 
 ## 14. Extension points
 
-Left clean but unimplemented:
+Modelled and documented, with the hard part already done:
 
-- **Content authoring UI** — the Zod schemas in `src/content/schema.ts` already
-  describe the full shape a form would need to produce.
-- **Real content ingestion** — replace `src/content/demo/` with authored
-  material and drop the `is_demo` flag. The demo-deletion path exists precisely
-  so synthetic content can be removed without disturbing production content.
+- **Ingesting your own licensed material.** The pathway is complete and tested:
+  create a `ContentSource`, split it with `chunkSourceText` into
+  `SourceFragment` rows, author `LearningPoint` rows against those fragments,
+  map them to cases and lectures, then run the coverage audit. Nothing is
+  fetched or scraped, and the app stores only material you provide.
+- **Patient headshots** — `patient_visual` carries `asset_type` / `asset_path`,
+  `lib/assets/index.ts` is the single resolver, and `Avatar` already renders an
+  image when one is present. Sizing is identical either way, so adding images
+  will not reflow the floor map or the chart header.
+- **Lecture figures** — `lecture_section` carries `media_type`,
+  `media_asset_path`, `caption` and `alt_text`.
+- **Attached imaging** — `case_imaging_result.image_asset_path`; the report
+  component renders it when non-null.
+- **ED flow** — ED, trauma, boarding and hallway rooms are seeded and
+  `patient_instance.location_type` distinguishes `ED` / `INPATIENT` /
+  `DISCHARGED`, so an ED → admitted → inpatient transition can be added without
+  a migration.
+- **Learning-point merging** — `canonical_learning_point_id` / `is_canonical`
+  and `mergeLearningPoint` exist; only the review UI is missing.
+- **Case revision history** — `case_revision` snapshots every custom-case edit;
+  the revert UI is not built, but the data is there.
+- **Full case editing** — the Zod schemas in `src/content/schema.ts` describe
+  the exact shape a form would need to produce for findings, prompts and rules.
 - **Case variation** — `PatientInstance` is already separate from
   `CaseTemplate`; variation would add a modifier layer between them.
 - **Richer scoring** — `study_event` is append-only and complete, so any future
@@ -446,8 +808,8 @@ Left clean but unimplemented:
 - **Multi-user** — every table already carries `user_id`.
 - **Better spaced repetition** — swap `SPACED_REPETITION_INTERVALS` and
   `nextMasteryLevel()`; nothing else depends on the internals.
-- **Server-side TTS** — the `AudioPlayer` interface would accept an audio-URL
-  source with no changes to callers.
+- **Server-side TTS** — `useSpeechPlayer` is the only thing that touches the
+  browser API; an audio-URL source would replace it with no change to callers.
 
 ## 15. Testing
 
@@ -455,7 +817,11 @@ Left clean but unimplemented:
 npm test
 ```
 
-65 tests across four files:
+185 tests across 13 files. Every test runs against a real in-memory SQLite
+database with the real migrations and the real demo content — there are no
+mocks of the domain layer.
+
+**V1 suites (65 tests), all still green:**
 
 - `tests/scheduler.test.ts` — panel size ceiling, gentle catch-up, no backlog,
   rotation preference, due-concept preference, recency penalty, lecture boost,
@@ -471,6 +837,39 @@ npm test
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
+**V2 suites (120 tests):**
+
+- `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
+  machine emits no speak effect without an explicit action; Play from stopped
+  speaks, Play from paused *resumes* rather than restarting the sentence;
+  selecting a section jumps while playing but only moves the cursor while
+  paused; a stale `SECTION_ENDED` after Stop is ignored.
+- `tests/bootstrap.test.ts` — a new profile receives a usable service
+  immediately, exactly once, with at least one handoff and one admission;
+  respects a census cap; distinct rooms; deterministic for the same profile and
+  date; and does **not** stack with the daily scheduler on day one.
+- `tests/rooms.test.ts` — no duplicate room assignment, lowest free room first,
+  discharge frees the bed, rounds sort ascending, a full ward assigns nothing
+  and says why, legacy patients backfilled.
+- `tests/labs.test.ts` — flags derived from the central range, sex-specific
+  ranges, results gated behind their trigger order, and the preference toggle
+  never hiding a flag.
+- `tests/chart.test.ts` — problems added and removed, selections toggled and
+  discarded with their problem, required/contraindicated scoring, note
+  rendering.
+- `tests/contentValidation.test.ts` — every bundled case validates; a correct
+  key matching no choice, duplicate sequence numbers, missing concepts, missing
+  lab definitions, unreachable triggers and orphaned mappings are all rejected;
+  the publish gate refuses a case with errors.
+- `tests/contentPacks.test.ts` — v1 packs migrate forward, newer-than-this-build
+  packs are refused with an explanation, malformed packs write nothing,
+  re-import is idempotent, and an export round-trips.
+- `tests/migrations.test.ts` — builds a database at the V1 schema, fills it with
+  profile, panel, mastery and event data, runs the full migration chain, and
+  asserts both the row counts *and* the field values survive.
+- `tests/speechText.test.ts` — markdown never reaches the synthesiser,
+  abbreviations expand on whole words only, longest match wins.
+
 ## 16. Configuration
 
 Rename the hospital in one place — `src/config/app.ts`:
@@ -482,7 +881,30 @@ export const APP_CONFIG = {
 };
 ```
 
-Scheduler tuning is entirely in `src/config/scheduler.ts`.
+Scheduler tuning is entirely in `src/config/scheduler.ts`; hospital geography is
+in `src/config/hospital.ts`; laboratory reference ranges are in
+`src/content/labs/index.ts`.
+
+### Preferences vs. internals
+
+The learner is offered a handful of meaningful choices — workload intensity,
+maximum census, catch-up intensity, current-rotation emphasis — never raw
+coefficients. `domain/settings/index.ts` is the **only** place that translates
+one into the other (`resolveSchedulerTuning`), and the scheduler never reads a
+preference string directly. That indirection is what lets the internal formula
+change without invalidating anyone's saved settings.
+
+Settings → Scheduler shows the resolved values, so the translation is visible
+rather than mysterious.
+
+### Theming
+
+The `ink` and `clinical` scales are *semantic*, not literal lightness values:
+in dark mode the ink scale is inverted in place, so a component written as
+`text-ink-700 bg-surface` is correct in both themes without a `dark:` variant.
+Clinical status colours (`good` / `warn` / `bad`) work the same way — use those
+rather than Tailwind's `emerald` / `amber` / `rose`, which are fixed values and
+stay light in dark mode.
 
 ---
 
