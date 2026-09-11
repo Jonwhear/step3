@@ -30,7 +30,8 @@ import { getCurrentRotation, getProfile, USER_ID } from "@/domain/profile";
 import { getBootstrapDate } from "./bootstrap";
 import {
   countAvailableInpatientRooms,
-  findAvailableRoom,
+  countPlaceableInpatientBeds,
+  findOrOpenRoom,
   reconcilePatientRooms,
   seedHospitalRooms,
 } from "@/domain/rooms";
@@ -121,7 +122,7 @@ function explainNoAssignment(input: {
     return "Every published case is already on your service. Discharge someone, or add more content.";
   }
   if (input.freeRooms === 0) {
-    return `Every inpatient room on ${INPATIENT_UNIT} is occupied.`;
+    return `Every inpatient room on ${INPATIENT_UNIT}, including overflow, is occupied.`;
   }
   if (input.slots === 0) {
     return `Your census cap of ${input.censusCap} is reached (${input.activePanelSize} active).`;
@@ -248,16 +249,20 @@ export function runDailyScheduler(
   const panel = listActivePanel(db);
   const activePanelSize = panel.length;
   const freeRooms = countAvailableInpatientRooms(db);
+  // Beds the ward could still produce, counting overflow it would open. A
+  // learner who filled Floor 4 from the ED must not silently cost themselves
+  // tomorrow's scheduled patient.
+  const placeableBeds = countPlaceableInpatientBeds(db);
   // Two independent ceilings: the learner's census preference and the physical
   // ward. Whichever binds first is the one to report (spec §55).
   const slots = Math.min(
     availablePanelSlots(activePanelSize, tuning.effectiveCensusCap),
-    freeRooms,
+    placeableBeds,
   );
   if (slots === 0) {
     notes.push(
-      freeRooms === 0
-        ? `Every inpatient room on ${INPATIENT_UNIT} is occupied; no new patients today.`
+      placeableBeds === 0
+        ? `Every inpatient room on ${INPATIENT_UNIT}, including overflow, is occupied; no new patients today.`
         : `Census is at your configured cap (${activePanelSize}/${tuning.effectiveCensusCap}); no new patients today.`,
     );
   }
@@ -390,12 +395,18 @@ export function runDailyScheduler(
     const candidate = eligible.find((c) => c.id === score.caseId);
     if (!candidate) continue;
 
-    const room = findAvailableRoom(db, "INPATIENT", reservedRooms);
-    if (!room) {
+    const placement = findOrOpenRoom(db, "INPATIENT", reservedRooms);
+    if (!placement) {
       notes.push("Ran out of inpatient rooms partway through today's assignment.");
       break;
     }
+    const room = placement.room;
     reservedRooms.add(room.id);
+    if (placement.openedOverflow) {
+      notes.push(
+        `Floor 4 was full, so overflow bed ${room.roomNumber} was opened for this patient.`,
+      );
+    }
 
     let decision: EntryModeDecision = chooseEntryMode({
       conceptMasteryLevels: candidate.conceptIds.map((id) => masteryByConcept.get(id) ?? 0),
@@ -457,7 +468,7 @@ export function runDailyScheduler(
         assignedCount: assigned.length,
         requested: newPatientsRequested,
         slots,
-        freeRooms,
+        freeRooms: placeableBeds,
         eligibleCount: eligible.length,
         totalCases: cases.length,
         dailyTarget: pacing.dailyTarget,

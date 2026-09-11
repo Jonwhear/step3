@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { APP_CONFIG } from "@/config/app";
 import { INPATIENT_ROOM_COUNT, INPATIENT_UNIT } from "@/config/hospital";
 import { resetPreferencesAction } from "@/app/actions";
 import { AppHeader } from "@/components/layout/AppHeader";
@@ -7,13 +6,21 @@ import { PageShell } from "@/components/layout/PageShell";
 import { Card, SectionHeading } from "@/components/ui";
 import { OnboardingForm } from "@/app/onboarding/OnboardingForm";
 import { RotationEditor } from "@/app/onboarding/RotationEditor";
-import { SegmentedPreference, TogglePreference } from "./PreferenceControls";
+import {
+  ReviewIntervalsEditor,
+  SegmentedPreference,
+  TogglePreference,
+} from "./PreferenceControls";
 import { getProfile, listRotations } from "@/domain/profile";
 import {
   getPreferences,
+  MAX_REVIEW_INTERVAL_DAYS,
+  MIN_REVIEW_INTERVAL_DAYS,
   resolveSchedulerTuning,
+  REVIEWABLE_LEVELS,
   SETTINGS_KEYS,
 } from "@/domain/settings";
+import { MASTERY_LABELS } from "@/config/scheduler";
 import { db } from "@/server/db";
 import { addDays, todayIso } from "@/lib/date";
 
@@ -92,7 +99,7 @@ export default function SettingsPage() {
               settingKey={SETTINGS_KEYS.accent}
               value={prefs.appearance.accent}
               options={[
-                { value: "clinical", label: "Clinical blue" },
+                { value: "clinical", label: "Ceil" },
                 { value: "teal", label: "Teal" },
                 { value: "indigo", label: "Indigo" },
                 { value: "slate", label: "Slate" },
@@ -111,24 +118,6 @@ export default function SettingsPage() {
               settingKey={SETTINGS_KEYS.showLabReferenceRanges}
               enabled={prefs.labs.showReferenceRanges}
             />
-          </Card>
-        </section>
-
-        {/* --- audio -------------------------------------------------------- */}
-        <section className="mt-6">
-          <SectionHeading>Audio</SectionHeading>
-          <Card className="p-4">
-            <p className="text-sm text-ink-700">
-              Audio never starts on its own. Every screen opens silent, and
-              playback begins only when you press Play. Speed and voice are
-              chosen in the player itself and are remembered between sessions.
-            </p>
-            <p className="mt-3 border-t border-ink-100 pt-3 text-xs text-ink-400">
-              Speech uses the browser&apos;s built-in synthesis. Voice
-              availability and quality vary between browsers, and some have no
-              voices at all — in that case all content remains readable on
-              screen.
-            </p>
           </Card>
         </section>
 
@@ -176,6 +165,16 @@ export default function SettingsPage() {
                 { value: "high", label: "High" },
               ]}
             />
+
+            <div className="border-t border-ink-100 pt-4">
+              <ReviewIntervalsEditor
+                intervals={prefs.scheduler.reviewIntervals}
+                levels={REVIEWABLE_LEVELS}
+                labels={MASTERY_LABELS}
+                min={MIN_REVIEW_INTERVAL_DAYS}
+                max={MAX_REVIEW_INTERVAL_DAYS}
+              />
+            </div>
 
             <div className="border-t border-ink-100 pt-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500">
@@ -232,20 +231,6 @@ export default function SettingsPage() {
           </Card>
         </section>
 
-        <section className="mt-6">
-          <SectionHeading>About</SectionHeading>
-          <Card className="p-4">
-            <p className="text-sm text-ink-700">{APP_CONFIG.educationalDisclaimer}</p>
-            <p className="mt-2 text-xs text-ink-400">
-              All clinical content currently loaded is original synthetic
-              material authored for this prototype. It is labelled{" "}
-              <code className="rounded bg-ink-100 px-1">
-                {APP_CONFIG.demo.contentOrigin}
-              </code>{" "}
-              and is not derived from any question bank or textbook.
-            </p>
-          </Card>
-        </section>
       </PageShell>
     </>
   );

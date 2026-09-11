@@ -8,7 +8,13 @@
  */
 
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
-import { HOSPITAL_ROOMS, INPATIENT_UNIT } from "@/config/hospital";
+import {
+  HOSPITAL_ROOMS,
+  INPATIENT_ROOM_COUNT,
+  INPATIENT_UNIT,
+  MAX_OVERFLOW_ROOMS,
+  overflowRoomSpec,
+} from "@/config/hospital";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
 import { ACTIVE_PANEL_STATES } from "@/domain/constants";
@@ -191,6 +197,72 @@ export function findAvailableRoom(
 export function countAvailableInpatientRooms(db: Db): number {
   const occupancy = getOccupancy(db);
   return listInpatientRooms(db).filter((r) => !occupancy.has(r.id)).length;
+}
+
+/* --------------------------------- overflow -------------------------------- */
+
+/** Overflow beds already opened, whether or not anyone is in them. */
+export function countOpenOverflowRooms(db: Db): number {
+  return Math.max(0, listInpatientRooms(db).length - INPATIENT_ROOM_COUNT);
+}
+
+/** Overflow beds that could still be opened. */
+export function remainingOverflowCapacity(db: Db): number {
+  return Math.max(0, MAX_OVERFLOW_ROOMS - countOpenOverflowRooms(db));
+}
+
+/**
+ * Every bed that could hold a new inpatient — free beds now, plus overflow
+ * beds the ward would open if asked. This is the number capacity decisions
+ * should use, so a full floor never silently drops a patient.
+ */
+export function countPlaceableInpatientBeds(db: Db): number {
+  return countAvailableInpatientRooms(db) + remainingOverflowCapacity(db);
+}
+
+/**
+ * Opens the next overflow bed, or returns null once the ward has flexed as far
+ * as it will go. Numbering continues the floor (411, 412, …) and is stable, so
+ * a reopened bed keeps its identity.
+ */
+export function openOverflowRoom(db: Db): t.HospitalRoomRow | null {
+  const opened = countOpenOverflowRooms(db);
+  if (opened >= MAX_OVERFLOW_ROOMS) return null;
+
+  const spec = overflowRoomSpec(opened);
+  const id = roomId(spec.unit, spec.roomNumber);
+  db.insert(t.hospitalRoom)
+    .values({
+      id,
+      unit: spec.unit,
+      roomNumber: spec.roomNumber,
+      roomType: spec.roomType,
+      // Sorted after the standard floor so rounds still walk 401 → 410 → 411.
+      displayOrder: INPATIENT_ROOM_COUNT + opened,
+      isActive: true,
+    })
+    .onConflictDoNothing()
+    .run();
+
+  return getRoom(db, id);
+}
+
+/**
+ * A free bed, opening an overflow bed if the floor is full. Callers that must
+ * place a patient use this; callers that merely want to know whether the ward
+ * is full use `findAvailableRoom`.
+ */
+export function findOrOpenRoom(
+  db: Db,
+  locationType: LocationType,
+  reserved: ReadonlySet<string> = new Set(),
+): { room: t.HospitalRoomRow; openedOverflow: boolean } | null {
+  const existing = findAvailableRoom(db, locationType, reserved);
+  if (existing) return { room: existing, openedOverflow: false };
+  if (locationType !== "INPATIENT") return null;
+
+  const overflow = openOverflowRoom(db);
+  return overflow ? { room: overflow, openedOverflow: true } : null;
 }
 
 /**

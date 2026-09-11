@@ -9,8 +9,12 @@
  * what re-stamps the theme attributes on <html>.
  */
 
-import { useTransition } from "react";
-import { savePreferenceAction } from "@/app/actions";
+import { useActionState, useTransition } from "react";
+import {
+  savePreferenceAction,
+  saveReviewIntervalsAction,
+  type ActionState,
+} from "@/app/actions";
 
 export function SegmentedPreference({
   label,
@@ -89,5 +93,76 @@ export function TogglePreference({
         { value: "false", label: "Off" },
       ]}
     />
+  );
+}
+
+/**
+ * Spaced-repetition schedule.
+ *
+ * These numbers were previously displayed read-only on the developer page,
+ * which implied they were adjustable without offering any way to adjust them.
+ * They are a genuine study preference, so they belong here and they are now
+ * editable — the domain layer clamps anything out of range.
+ */
+export function ReviewIntervalsEditor({
+  intervals,
+  levels,
+  labels,
+  min,
+  max,
+}: {
+  intervals: Record<number, number>;
+  levels: readonly number[];
+  labels: Record<number, string>;
+  min: number;
+  max: number;
+}) {
+  const [state, formAction, pending] = useActionState(saveReviewIntervalsAction, {
+    ok: false,
+  } as ActionState);
+
+  return (
+    <form action={formAction}>
+      <p className="text-sm font-medium text-ink-800">Review intervals</p>
+      <p className="mt-0.5 text-xs text-ink-500">
+        Days until a concept comes back after a correct answer at each mastery
+        level. An incorrect answer always returns the next day.
+      </p>
+
+      <div className="mt-3 space-y-2">
+        {levels.map((level) => (
+          <label key={level} className="flex items-center justify-between gap-3">
+            <span className="text-sm text-ink-700">
+              {labels[level] ?? `Level ${level}`}
+              <span className="ml-1.5 text-xs text-ink-400">level {level}</span>
+            </span>
+            <span className="flex items-center gap-2">
+              <input
+                type="number"
+                name={`level_${level}`}
+                defaultValue={intervals[level]}
+                min={min}
+                max={max}
+                className="h-10 w-20 rounded-lg border border-ink-200 bg-surface px-2 text-right text-sm tabular-nums text-ink-900"
+              />
+              <span className="w-8 text-xs text-ink-500">days</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <button
+        type="submit"
+        disabled={pending}
+        className="mt-3 h-11 w-full rounded-lg border border-ink-200 text-sm font-medium text-ink-700 disabled:opacity-50"
+      >
+        {pending ? "Saving…" : "Save review intervals"}
+      </button>
+      {state.ok ? (
+        <p className="mt-2 text-xs text-good-700">
+          Saved. New intervals apply from your next graded answer.
+        </p>
+      ) : null}
+    </form>
   );
 }

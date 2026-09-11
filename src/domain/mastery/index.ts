@@ -17,6 +17,7 @@ import {
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
 import { USER_ID } from "@/domain/profile";
+import { getReviewIntervals } from "@/domain/settings";
 import { addDays, nowIso, todayIso, type IsoDate } from "@/lib/date";
 
 export function getConceptState(
@@ -66,9 +67,18 @@ function ensureState(db: Db, conceptId: string): t.UserConceptStateRow {
   return getConceptState(db, conceptId) as t.UserConceptStateRow;
 }
 
-/** Days until a concept at `masteryLevel` should be reviewed again. */
-export function intervalForMastery(masteryLevel: number): number | null {
-  return SPACED_REPETITION_INTERVALS[masteryLevel] ?? null;
+/**
+ * Days until a concept at `masteryLevel` should be reviewed again.
+ *
+ * The schedule is a learner preference, so callers that have a database hand in
+ * the resolved map; the shipped defaults are used otherwise. Level 0 has no
+ * interval at all — an unseen concept needs an introduction, not a review.
+ */
+export function intervalForMastery(
+  masteryLevel: number,
+  intervals: Record<number, number | null> = SPACED_REPETITION_INTERVALS,
+): number | null {
+  return intervals[masteryLevel] ?? null;
 }
 
 /**
@@ -101,7 +111,9 @@ export function updateConceptMastery(
   const newLevel = nextMasteryLevel(previousLevel, correct);
 
   // An incorrect answer always comes back tomorrow, whatever the level says.
-  const interval = correct ? intervalForMastery(newLevel) : INCORRECT_REVIEW_INTERVAL_DAYS;
+  const interval = correct
+    ? intervalForMastery(newLevel, getReviewIntervals(db))
+    : INCORRECT_REVIEW_INTERVAL_DAYS;
   const nextDueAt = interval === null ? null : addDays(today, interval);
 
   db.update(t.userConceptState)

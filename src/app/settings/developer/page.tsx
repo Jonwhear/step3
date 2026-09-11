@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { APP_CONFIG } from "@/config/app";
-import { SCHEDULER_CONFIG, SPACED_REPETITION_INTERVALS } from "@/config/scheduler";
+import { SCHEDULER_CONFIG } from "@/config/scheduler";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
 import { Card, EmptyState, SectionHeading, StatRow } from "@/components/ui";
@@ -9,6 +9,11 @@ import * as schema from "@/db/schema";
 import { INPATIENT_UNIT } from "@/config/hospital";
 import { listCaseSummaries } from "@/domain/content/cases";
 import { buildCoverageTotals } from "@/domain/content/provenance";
+import {
+  DEFAULT_REVIEW_INTERVALS,
+  getReviewIntervals,
+  REVIEWABLE_LEVELS,
+} from "@/domain/settings";
 import { buildFloorMap } from "@/domain/rooms";
 import { getSchedulerDebug } from "@/domain/scheduler";
 import { listStudyEvents } from "@/domain/patients";
@@ -44,6 +49,7 @@ export default function DeveloperPage() {
   const publishedCases = allCases.filter((c) => c.status === "PUBLISHED").length;
   const casesWithErrors = allCases.filter((c) => c.errorCount > 0).length;
   const coverage = buildCoverageTotals(database);
+  const reviewIntervals = getReviewIntervals(database);
 
   return (
     <>
@@ -305,14 +311,27 @@ export default function DeveloperPage() {
         <section className="mt-6">
           <SectionHeading>Spaced repetition intervals</SectionHeading>
           <Card className="divide-y divide-ink-100 px-4">
-            {Object.entries(SPACED_REPETITION_INTERVALS).map(([level, days]) => (
+            <StatRow label="Mastery 0" value="not scheduled" hint="needs introduction" />
+            {REVIEWABLE_LEVELS.map((level) => (
               <StatRow
                 key={level}
                 label={`Mastery ${level}`}
-                value={days === null ? "not scheduled" : `${days} day${days === 1 ? "" : "s"}`}
+                value={`${reviewIntervals[level]} day${reviewIntervals[level] === 1 ? "" : "s"}`}
+                hint={
+                  reviewIntervals[level] === DEFAULT_REVIEW_INTERVALS[level]
+                    ? undefined
+                    : `default ${DEFAULT_REVIEW_INTERVALS[level]}`
+                }
               />
             ))}
           </Card>
+          <p className="mt-2 text-xs text-ink-400">
+            These are the values currently in force. Change them in{" "}
+            <Link href="/settings" className="font-medium text-clinical-600">
+              Settings → Scheduler
+            </Link>
+            .
+          </p>
         </section>
 
         {/* --------------------------- demo content -------------------------- */}

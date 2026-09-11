@@ -113,58 +113,47 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
         onPreferenceChange={(prefs) => void saveAudioPreferenceAction(prefs)}
       />
 
-      {/* Contents: tapping a heading moves playback there immediately. */}
-      <nav aria-label="Lecture contents">
-        <Card className="divide-y divide-ink-100">
-          {lecture.sections.map((section, index) => (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => player.select(index)}
-              aria-current={index === active ? "true" : undefined}
-              className={`tap flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm ${
-                index === active
-                  ? "bg-clinical-50 font-medium text-clinical-700"
-                  : "text-ink-700"
-              }`}
-            >
-              <span className="w-5 shrink-0 text-xs tabular-nums text-ink-400">
-                {index + 1}
-              </span>
-              <span className="truncate">{section.displayLabel}</span>
-              {index === active && player.machine.state === "PLAYING" ? (
-                <span className="ml-auto text-[11px] uppercase tracking-wide text-clinical-600">
-                  Playing
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </Card>
-      </nav>
-
+      {/*
+        There is deliberately no contents list above these cards. A list of
+        "Part 1 … Part 6" told the learner nothing about what each part
+        contained, and duplicated navigation the sections themselves provide:
+        tapping a section jumps playback straight to it.
+      */}
       <div className="space-y-3">
-        {lecture.sections.map((section, index) => (
+        {lecture.sections.map((section, index) => {
+          const isActive = index === active;
+          const isPlaying = isActive && player.machine.state === "PLAYING";
+          return (
           <Card
             key={section.id}
             className={`p-4 ${
-              index === active ? "border-clinical-300 ring-1 ring-clinical-200" : ""
+              isActive ? "border-clinical-300 ring-1 ring-clinical-200" : ""
             }`}
           >
             <button
               type="button"
               onClick={() => player.select(index)}
-              className="tap block w-full text-left"
+              aria-current={isActive ? "true" : undefined}
+              className="tap flex w-full items-center gap-2 text-left"
             >
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-clinical-600">
+              <p
+                className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${
+                  isActive ? "text-clinical-600" : "text-ink-500"
+                }`}
+              >
                 {section.displayLabel}
               </p>
+              <span className="ml-auto shrink-0 text-[11px] uppercase tracking-wide text-clinical-600">
+                {isPlaying ? "Playing" : isActive ? "Selected" : "Play from here"}
+              </span>
             </button>
             <LectureBody body={section.body} className="mt-2" />
             {section.caption ? (
               <p className="mt-2 text-xs italic text-ink-500">{section.caption}</p>
             ) : null}
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       <Card className="p-4">

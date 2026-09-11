@@ -50,6 +50,7 @@ Implemented:
 | Teaching conference with headed sections and click-to-jump TTS | ✅ |
 | Progress dashboard with specialty/topic drill-down | ✅ |
 | Hospital geography: rooms 401–410, floor map, room-order rounds | ✅ |
+| ED board: search and admit a chosen diagnosis, with overflow beds | ✅ |
 | EMR chart: patient header, tabs, grouped labs, imaging reports | ✅ |
 | Central laboratory reference library + reference-range toggle | ✅ |
 | Problem-based Assessment & Plan with deterministic scoring | ✅ |
@@ -60,9 +61,10 @@ Implemented:
 | Portable, versioned content packs with migration adapters | ✅ |
 | Dark mode, font size, density, accent | ✅ |
 | Scheduler preferences (workload, census, catch-up, rotation emphasis) | ✅ |
+| Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (185) | ✅ |
+| Automated tests (221) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -99,7 +101,8 @@ mutation goes through a Server Action so nothing is graded on the client.
 ```
 src/
   app/                 routes + server actions
-    onboarding/ handoff/ rounds/ admissions/ conference/
+    onboarding/ handoff/ rounds/ conference/
+    admissions/        workup + the ED board
     patients/[id]/     tabbed EMR chart + assessment & plan
     progress/ settings/
     settings/content/  content library, case editor, coverage audit, packs
@@ -109,7 +112,7 @@ src/
     scheduler/         pacing.ts, scoring.ts, entryMode.ts, bootstrap.ts, index.ts
     content/           provenance.ts, validation.ts, cases.ts, packs.ts
     cases/ patients/ mastery/ lectures/ actions/ progress/ profile/
-    rooms/ labs/ chart/ settings/
+    rooms/ labs/ chart/ settings/ admissions/
   db/                  schema.ts, client.ts, migrations/, seed/, scripts/
   content/
     schema.ts          Zod schemas for all authored content
@@ -117,7 +120,7 @@ src/
     demo/              cases/, concepts/, lectures/, actions/, sources/, learningPoints/
   lib/                 date/, seededRandom/, audio/, speech/, assets/
   config/              app.ts, scheduler.ts, hospital.ts  ← all tuning lives here
-tests/                 13 suites — see §15
+tests/                 15 suites — see §15
 ```
 
 ### Layer rules
@@ -180,6 +183,7 @@ conference. Normal pacing starts the following day.
 | Patient chart (Summary · Handoff · Results · Chart · Rounds · Course) | `/patients/<id>` |
 | EMR labs and imaging | `/patients/<id>?tab=results` |
 | Assessment & Plan | `/patients/<id>?tab=chart` |
+| ED board — admit a diagnosis you choose | `/admissions` |
 | Content library and case editor | `/settings/content` |
 | Content coverage audit | `/settings/content/coverage` |
 | Import / export content packs | `/settings/content/packs` |
@@ -540,9 +544,43 @@ bed with no separate bookkeeping step that could be missed.
   `reconcilePatientRooms`, matching on the old free-text room number where the
   room is free.
 
+**Overflow beds.** A learner who admits several patients from the ED can fill
+Floor 4 and leave no bed for the next morning. Rather than refusing the
+admission — or silently dropping tomorrow's patient — the ward opens overflow
+beds 411–416, the way a real floor flexes. Both the scheduler and the ED board
+go through `findOrOpenRoom`, so neither can be starved by the other, and the
+ward still cannot grow without limit.
+
+The census cap and the ED board answer to different rules, deliberately:
+
+- The **cap paces the scheduler** — how many patients arrive on their own.
+- **Self-admission is the learner's call** and is bounded by beds, not by the
+  cap. Going above it is a warning, not a refusal: the consequence is that the
+  scheduler sends nothing new until the census falls back under the cap, which
+  is real but reversible.
+
 Patient thumbnails render as initials today. `patient_visual` already carries
 `asset_type` / `asset_path`, and `lib/assets/index.ts` is the single resolver,
 so attaching generated headshots later is a change in one place.
+
+## 11a-2. The ED board
+
+The scheduler decides what the learner *should* see. The ED board is the other
+direction: someone with time left, or a specific weakness to work on, can pick
+up a patient themselves.
+
+- Search covers diagnosis, specialty, topic, complaint and case code. Multiple
+  terms narrow rather than widen, so "surgery acute" is more specific than
+  either word alone.
+- `listEdBoard` returns the **whole** admittable library by default and the
+  component paginates. Trimming server-side would silently limit a search to
+  the visible slice — which is exactly what a learner hunting one diagnosis
+  would hit.
+- The board shows the working diagnosis, unlike a scheduled admission which
+  hides it. That is the point: the learner is *choosing* what to practise. The
+  workup itself is identical either way.
+- Capacity is re-checked at admit time, not trusted from the rendered page,
+  since a discharge may have happened in between.
 
 ## 11b. Laboratory and imaging
 
@@ -817,7 +855,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-185 tests across 13 files. Every test runs against a real in-memory SQLite
+221 tests across 15 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -837,7 +875,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (120 tests):**
+**V2 suites (156 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped
@@ -869,6 +907,14 @@ mocks of the domain layer.
   asserts both the row counts *and* the field values survive.
 - `tests/speechText.test.ts` — markdown never reaches the synthesiser,
   abbreviations expand on whole words only, longest match wins.
+- `tests/edBoard.test.ts` — search narrows across fields, the board reaches the
+  whole library, a case leaves the board once admitted, the learner may admit
+  past their census cap, overflow beds open in sequence and are reused once
+  freed, and the ward stops flexing at its limit.
+- `tests/reviewIntervals.test.ts` — defaults match the shipped schedule, an
+  out-of-range or malformed value never reaches the scheduler (including a JSON
+  array, which would otherwise be read by numeric index), and a saved interval
+  changes when a concept next comes back.
 
 ## 16. Configuration
 
@@ -896,6 +942,11 @@ change without invalidating anyone's saved settings.
 
 Settings → Scheduler shows the resolved values, so the translation is visible
 rather than mysterious.
+
+The spaced-repetition intervals are the exception to "no raw coefficients":
+they are a genuine study decision, so they are directly editable there. Values
+are clamped to 1–365 days on the way in, and a malformed stored value falls
+back to the shipped default per level rather than reaching the scheduler.
 
 ### Theming
 

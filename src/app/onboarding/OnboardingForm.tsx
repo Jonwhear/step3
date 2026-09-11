@@ -7,6 +7,16 @@ import type { UserProfileRow } from "@/db/schema";
 
 const initial: ActionState = { ok: false };
 
+/**
+ * Shared field styling.
+ *
+ * These are theme tokens rather than literal colours: the form previously set a
+ * hardcoded white background, which left the near-white dark-mode text sitting
+ * on white and effectively unreadable.
+ */
+const INPUT_CLASS =
+  "h-12 w-full rounded-lg border border-ink-200 bg-surface px-3 text-sm text-ink-900";
+
 export function OnboardingForm({
   profile,
   defaultStep3Date,
@@ -25,12 +35,12 @@ export function OnboardingForm({
           required
           defaultValue={profile?.name ?? ""}
           autoComplete="name"
-          className="input"
+          className={INPUT_CLASS}
         />
       </Field>
 
       <Field label="Degree" htmlFor="degree">
-        <select id="degree" name="degree" defaultValue={profile?.degree ?? "MD"} className="input">
+        <select id="degree" name="degree" defaultValue={profile?.degree ?? "MD"} className={INPUT_CLASS}>
           {DEGREES.map((d) => (
             <option key={d} value={d}>
               {d}
@@ -44,7 +54,7 @@ export function OnboardingForm({
           id="specialty"
           name="specialty"
           defaultValue={profile?.specialty ?? "Internal Medicine"}
-          className="input"
+          className={INPUT_CLASS}
         >
           {SPECIALTIES.map((s) => (
             <option key={s} value={s}>
@@ -61,7 +71,7 @@ export function OnboardingForm({
           type="date"
           required
           defaultValue={profile?.step3Date ?? defaultStep3Date}
-          className="input"
+          className={INPUT_CLASS}
         />
       </Field>
 
@@ -78,7 +88,7 @@ export function OnboardingForm({
           max={5000}
           required
           defaultValue={profile?.targetPatientCount ?? 300}
-          className="input"
+          className={INPUT_CLASS}
         />
       </Field>
 
@@ -100,19 +110,6 @@ export function OnboardingForm({
       >
         {pending ? "Saving…" : "Save profile"}
       </button>
-
-      <style>{`
-        .input {
-          height: 3rem;
-          width: 100%;
-          border-radius: 0.5rem;
-          border: 1px solid var(--color-ink-200);
-          background: white;
-          padding: 0 0.75rem;
-          font-size: 0.875rem;
-          color: var(--color-ink-900);
-        }
-      `}</style>
     </form>
   );
 }

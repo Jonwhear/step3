@@ -9,7 +9,7 @@
  */
 
 import { INPATIENT_ROOM_COUNT } from "@/config/hospital";
-import { SCHEDULER_CONFIG } from "@/config/scheduler";
+import { SCHEDULER_CONFIG, SPACED_REPETITION_INTERVALS } from "@/config/scheduler";
 import type { Db } from "@/db/client";
 import { getSettings, setSetting } from "@/domain/profile";
 
@@ -23,6 +23,7 @@ export const SETTINGS_KEYS = {
   maxCensus: "scheduler.maxCensus",
   catchUpIntensity: "scheduler.catchUpIntensity",
   rotationEmphasis: "scheduler.rotationEmphasis",
+  reviewIntervals: "scheduler.reviewIntervals",
   bootstrapCompleted: "onboarding.bootstrapCompleted",
   /** Date the starter service was created; the scheduler defers to it. */
   bootstrapDate: "onboarding.bootstrapDate",
@@ -61,12 +62,62 @@ export interface LabPreferences {
   showReferenceRanges: boolean;
 }
 
+/**
+ * Days until a concept at each mastery level comes back, keyed by level.
+ * Level 0 is absent by construction: an unseen concept needs an introduction,
+ * not a review, so it is never scheduled.
+ */
+export type ReviewIntervals = Record<number, number>;
+
 export interface SchedulerPreferences {
   workloadIntensity: Intensity;
   /** Learner ceiling; the effective cap is min(this, physical rooms). */
   maxCensus: number;
   catchUpIntensity: CatchUpIntensity;
   rotationEmphasis: Emphasis;
+  /** Learner-adjustable spaced-repetition schedule (spec §49). */
+  reviewIntervals: ReviewIntervals;
+}
+
+/** Levels the learner can retune. Level 0 is not a reviewable state. */
+export const REVIEWABLE_LEVELS = [1, 2, 3, 4, 5] as const;
+
+/** Bounds on a review interval, so a typo cannot disable review entirely. */
+export const MIN_REVIEW_INTERVAL_DAYS = 1;
+export const MAX_REVIEW_INTERVAL_DAYS = 365;
+
+export const DEFAULT_REVIEW_INTERVALS: ReviewIntervals = Object.fromEntries(
+  REVIEWABLE_LEVELS.map((level) => [level, SPACED_REPETITION_INTERVALS[level] ?? 1]),
+);
+
+/**
+ * Parses the stored override map, ignoring anything malformed or out of range
+ * rather than letting it reach the scheduler. Missing levels fall back to the
+ * shipped default, so a partially written value still yields a usable schedule.
+ */
+export function parseReviewIntervals(raw: string | undefined): ReviewIntervals {
+  const merged: ReviewIntervals = { ...DEFAULT_REVIEW_INTERVALS };
+  if (!raw) return merged;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return merged;
+  }
+  // An array must be rejected explicitly: it is an object, and indexing it by
+  // "1" would silently read element 1 as the level-1 interval.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return merged;
+
+  for (const level of REVIEWABLE_LEVELS) {
+    const value = (parsed as Record<string, unknown>)[String(level)];
+    const days = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(days)) continue;
+    const rounded = Math.round(days);
+    if (rounded < MIN_REVIEW_INTERVAL_DAYS || rounded > MAX_REVIEW_INTERVAL_DAYS) continue;
+    merged[level] = rounded;
+  }
+  return merged;
 }
 
 export interface UserPreferences {
@@ -88,6 +139,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     maxCensus: SCHEDULER_CONFIG.MAX_ACTIVE_PANEL_SIZE,
     catchUpIntensity: "gentle",
     rotationEmphasis: "standard",
+    reviewIntervals: DEFAULT_REVIEW_INTERVALS,
   },
 };
 
@@ -141,6 +193,7 @@ export function getPreferences(db: Db): UserPreferences {
         EMPHASES,
         DEFAULT_PREFERENCES.scheduler.rotationEmphasis,
       ),
+      reviewIntervals: parseReviewIntervals(s[SETTINGS_KEYS.reviewIntervals]),
     },
   };
 }
@@ -160,6 +213,19 @@ export function resetPreferences(db: Db): void {
   setSetting(db, SETTINGS_KEYS.maxCensus, String(d.scheduler.maxCensus));
   setSetting(db, SETTINGS_KEYS.catchUpIntensity, d.scheduler.catchUpIntensity);
   setSetting(db, SETTINGS_KEYS.rotationEmphasis, d.scheduler.rotationEmphasis);
+  setSetting(db, SETTINGS_KEYS.reviewIntervals, JSON.stringify(d.scheduler.reviewIntervals));
+}
+
+/** Reads just the review schedule. Used on every graded response. */
+export function getReviewIntervals(db: Db): ReviewIntervals {
+  return parseReviewIntervals(getSettings(db)[SETTINGS_KEYS.reviewIntervals]);
+}
+
+export function setReviewIntervals(db: Db, intervals: ReviewIntervals): ReviewIntervals {
+  // Round-trip through the parser so only valid values are ever persisted.
+  const clean = parseReviewIntervals(JSON.stringify(intervals));
+  setSetting(db, SETTINGS_KEYS.reviewIntervals, JSON.stringify(clean));
+  return clean;
 }
 
 /* --------------------- preference → engine translation -------------------- */

@@ -13,6 +13,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { deleteDemoContent, resetDemoContent, seedDemoContent } from "@/db/seed";
 import { listActions, matchTranscriptToActions } from "@/domain/actions";
+import { admitFromEd } from "@/domain/admissions";
 import {
   getCaseActionRules,
   getCaseById,
@@ -55,7 +56,12 @@ import {
   upsertProfile,
 } from "@/domain/profile";
 import { bootstrapNewUserService } from "@/domain/scheduler";
-import { resetPreferences, setPreference } from "@/domain/settings";
+import {
+  resetPreferences,
+  REVIEWABLE_LEVELS,
+  setPreference,
+  setReviewIntervals,
+} from "@/domain/settings";
 import { db } from "@/server/db";
 import { todayIso } from "@/lib/date";
 
@@ -198,6 +204,21 @@ export async function savePreferenceAction(formData: FormData): Promise<void> {
   if (!key.trim()) return;
   setPreference(db(), key, value);
   revalidateAll();
+}
+
+/** Saves the spaced-repetition schedule. Out-of-range values are ignored. */
+export async function saveReviewIntervalsAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const intervals: Record<number, number> = {};
+  for (const level of REVIEWABLE_LEVELS) {
+    const raw = Number(formData.get(`level_${level}`));
+    if (Number.isFinite(raw)) intervals[level] = raw;
+  }
+  setReviewIntervals(db(), intervals);
+  revalidateAll();
+  return { ok: true };
 }
 
 export async function resetPreferencesAction(): Promise<void> {
@@ -356,6 +377,38 @@ export async function submitPromptAction(
     caseEvidence: prompt.caseEvidence || undefined,
     detailedExplanation: prompt.detailedExplanation || undefined,
     sourceReferences: describeEvidence(database, "CASE_PROMPT", prompt.id),
+  };
+}
+
+/* ------------------------------- ED board --------------------------------- */
+
+export interface EdAdmitState {
+  status: "idle" | "admitted";
+  error?: string;
+  patientName?: string;
+  roomNumber?: string;
+  patientId?: string;
+  openedOverflow?: boolean;
+}
+
+/** Admits a case the learner chose from the ED board (spec §27). */
+export async function admitFromEdAction(
+  _prev: EdAdmitState,
+  formData: FormData,
+): Promise<EdAdmitState> {
+  const caseId = String(formData.get("caseId") ?? "");
+  if (!caseId) return { status: "idle", error: "Pick a patient to admit." };
+
+  const result = admitFromEd(db(), caseId, todayIso());
+  if (!result.ok) return { status: "idle", error: result.error };
+
+  revalidateAll();
+  return {
+    status: "admitted",
+    patientId: result.patientId,
+    patientName: result.patientName,
+    roomNumber: result.roomNumber,
+    openedOverflow: result.openedOverflow,
   };
 }
 

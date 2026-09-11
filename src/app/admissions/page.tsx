@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
-import { EmptyState } from "@/components/ui";
+import { SectionHeading } from "@/components/ui";
 import { listActions } from "@/domain/actions";
 import {
   getCaseActionRules,
@@ -10,11 +10,13 @@ import {
   getCasePrompts,
   promptChoices,
 } from "@/domain/cases";
+import { getEdCapacity, listEdBoard } from "@/domain/admissions";
 import { getPatient, listPatientActions, listPromptResponses } from "@/domain/patients";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
 import { formatLongDate } from "@/lib/date";
 import { AdmissionWorkup, type AdmissionCase } from "./AdmissionWorkup";
+import { EdBoard } from "./EdBoard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,11 @@ export default function AdmissionsPage() {
 
   const waiting = session.pendingAdmission[0];
 
+  // The board is built even when a scheduled admission is waiting, so the
+  // learner can queue up extra work without leaving the screen.
+  const edBoard = listEdBoard(database, { today: session.today });
+  const edCapacity = getEdCapacity(database);
+
   if (!waiting) {
     return (
       <>
@@ -33,11 +40,13 @@ export default function AdmissionsPage() {
           <header className="mb-4">
             <h1 className="text-lg font-semibold text-ink-900">Admissions</h1>
             <p className="text-sm text-ink-500">{formatLongDate(session.today)}</p>
+            <p className="mt-2 text-sm text-ink-600">
+              Nothing has been signed out to you right now. New admissions arrive
+              as the scheduler decides you are ready for a topic — or you can
+              pick someone up from the board below.
+            </p>
           </header>
-          <EmptyState
-            title="No admissions waiting"
-            body="The emergency department has nothing for you right now. New admissions arrive as the scheduler decides you are ready to be tested on a topic."
-          />
+          <EdBoard entries={edBoard} capacity={edCapacity} />
         </PageShell>
       </>
     );
@@ -119,6 +128,11 @@ export default function AdmissionsPage() {
           ) : null}
         </header>
         <AdmissionWorkup admission={admission} audio={session.audio} />
+
+        <section className="mt-8">
+          <SectionHeading>Also waiting in the ED</SectionHeading>
+          <EdBoard entries={edBoard} capacity={edCapacity} />
+        </section>
       </PageShell>
     </>
   );
