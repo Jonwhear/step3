@@ -28,7 +28,6 @@ import {
   listPatientActions,
   listPromptResponses,
   listRevealedFindingIds,
-  listStudyEventsForPatient,
 } from "@/domain/patients";
 import { getAudioPreferences } from "@/domain/profile";
 import { getPreferences } from "@/domain/settings";
@@ -36,7 +35,7 @@ import { resolvePatientVisual } from "@/lib/assets";
 import { db } from "@/server/db";
 import { formatShortDate } from "@/lib/date";
 import * as schema from "@/db/schema";
-import { AssessmentPlan } from "./AssessmentPlan";
+import { AssessmentPlan } from "@/components/emr/AssessmentPlan";
 import { DischargeFlow } from "./DischargeFlow";
 
 export const dynamic = "force-dynamic";
@@ -118,7 +117,6 @@ export default async function PatientPage({
 
   const actionDefs = new Map(listActions(database).map((a) => [a.actionCode, a]));
   const responses = listPromptResponses(database, patient.id);
-  const events = listStudyEventsForPatient(database, patient.id);
 
   const conceptIds = getCaseConceptIds(database, patient.caseId);
   const concepts = conceptIds.length
@@ -150,11 +148,9 @@ export default async function PatientPage({
 
   // Only offer tabs that actually have something behind them (spec §52).
   const available: ChartTab[] = ["summary"];
-  if (!undifferentiated) available.push("handoff");
   if (labPanels.length > 0 || imaging.length > 0 || groups.length > 0) available.push("results");
-  if (chart.length > 0) available.push("chart");
   if (responses.length > 0 || taken.length > 0) available.push("rounds");
-  if (events.length > 0) available.push("course");
+  if (chart.length > 0) available.push("chart");
 
   const tab = parseChartTab(requestedTab, available);
 
@@ -252,6 +248,28 @@ export default async function PatientPage({
               </Card>
             </section>
 
+            {!undifferentiated && template.handoffScript ? (
+              <section>
+                <SectionHeading>Sign-out</SectionHeading>
+                <Card className="p-4">
+                  <p className="text-sm leading-relaxed text-ink-800">
+                    {template.handoffScript}
+                  </p>
+                </Card>
+              </section>
+            ) : null}
+
+            {!undifferentiated && template.teachingPoint ? (
+              <section>
+                <SectionHeading>Teaching point</SectionHeading>
+                <Card className="border-clinical-200 bg-clinical-50 p-4">
+                  <p className="text-sm leading-relaxed text-clinical-700">
+                    {template.teachingPoint}
+                  </p>
+                </Card>
+              </section>
+            ) : null}
+
             {concepts.length > 0 ? (
               <section>
                 <SectionHeading>Concepts encountered</SectionHeading>
@@ -278,30 +296,6 @@ export default async function PatientPage({
                       </div>
                     );
                   })}
-                </Card>
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* ------------------------------ handoff -------------------------- */}
-        {tab === "handoff" ? (
-          <div className="mt-4 space-y-4">
-            <section>
-              <SectionHeading>Sign-out</SectionHeading>
-              <Card className="p-4">
-                <p className="text-sm leading-relaxed text-ink-800">
-                  {template.handoffScript}
-                </p>
-              </Card>
-            </section>
-            {template.teachingPoint ? (
-              <section>
-                <SectionHeading>Teaching point</SectionHeading>
-                <Card className="border-clinical-200 bg-clinical-50 p-4">
-                  <p className="text-sm leading-relaxed text-clinical-700">
-                    {template.teachingPoint}
-                  </p>
                 </Card>
               </section>
             ) : null}
@@ -425,28 +419,6 @@ export default async function PatientPage({
           </div>
         ) : null}
 
-        {/* --------------------------- hospital course --------------------- */}
-        {tab === "course" ? (
-          <div className="mt-4">
-            <SectionHeading>Hospital course</SectionHeading>
-            {events.length === 0 ? (
-              <EmptyState title="Nothing recorded yet" />
-            ) : (
-              <Card className="divide-y divide-ink-100">
-                {events.map((event) => (
-                  <div key={event.id} className="flex justify-between gap-4 px-4 py-2">
-                    <span className="text-sm text-ink-700">
-                      {event.eventType.replace(/_/g, " ").toLowerCase()}
-                    </span>
-                    <span className="shrink-0 text-xs tabular-nums text-ink-400">
-                      {formatShortDate(event.eventDate)}
-                    </span>
-                  </div>
-                ))}
-              </Card>
-            )}
-          </div>
-        ) : null}
       </PageShell>
     </>
   );

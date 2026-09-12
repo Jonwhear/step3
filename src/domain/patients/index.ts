@@ -17,7 +17,7 @@ import {
 } from "@/domain/constants";
 import { USER_ID } from "@/domain/profile";
 import { sortByRoomOrder } from "@/domain/rooms";
-import { nowIso, todayIso, type IsoDate } from "@/lib/date";
+import { nowIso, toIsoDate, todayIso, type IsoDate } from "@/lib/date";
 
 /* ------------------------------- study events ----------------------------- */
 
@@ -410,6 +410,36 @@ export function listPromptResponses(db: Db, patientId: string): t.PatientPromptR
     .where(eq(t.patientPromptResponse.patientInstanceId, patientId))
     .orderBy(asc(t.patientPromptResponse.createdAt))
     .all();
+}
+
+/**
+ * Whether this prompt was already answered on `date`.
+ *
+ * Rounds keeps a patient on the list until the learner explicitly finishes with
+ * them, so the same question can be reached twice in a day. Answering it twice
+ * would record two responses and move mastery twice off one piece of knowledge,
+ * which this lets the caller refuse.
+ */
+export function hasAnsweredPromptOn(
+  db: Db,
+  patientId: string,
+  promptId: string,
+  date: IsoDate,
+): boolean {
+  // `created_at` is a UTC instant while `date` is a local calendar day, so the
+  // comparison is made after converting — matching on the stored string's
+  // prefix would put a late-evening answer on the wrong day west of UTC.
+  return db
+    .select({ createdAt: t.patientPromptResponse.createdAt })
+    .from(t.patientPromptResponse)
+    .where(
+      and(
+        eq(t.patientPromptResponse.patientInstanceId, patientId),
+        eq(t.patientPromptResponse.promptId, promptId),
+      ),
+    )
+    .all()
+    .some((row) => toIsoDate(new Date(row.createdAt)) === date);
 }
 
 export function recordPromptResponse(

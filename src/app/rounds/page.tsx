@@ -7,9 +7,9 @@ import {
   getCasePrompts,
   promptChoices,
 } from "@/domain/cases";
-import { listCaseProblems } from "@/domain/chart";
+import { buildChart, lastPlanSignedDate } from "@/domain/chart";
 import { buildLabPanels } from "@/domain/labs";
-import { getPatient } from "@/domain/patients";
+import { getPatient, hasAnsweredPromptOn } from "@/domain/patients";
 import { initialsFor } from "@/domain/rooms";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
@@ -63,6 +63,9 @@ export default function RoundsPage() {
           flag: result.flagLabel,
         }));
 
+      const chart = buildChart(database, patient.id, patient.caseId);
+      const planSignedOn = lastPlanSignedDate(database, patient.id);
+
       return {
         patientId: patient.id,
         patientName: patient.patientName,
@@ -70,12 +73,27 @@ export default function RoundsPage() {
         roomNumber: patient.roomNumber,
         age: ageMatch?.[0] ?? "",
         abnormalLabs,
-        hasChart: listCaseProblems(database, patient.caseId).length > 0,
+        problems: chart.map((problem) => ({
+          id: problem.id,
+          label: problem.label,
+          assessmentText: problem.assessmentText,
+          isPrimary: problem.isPrimary,
+          added: problem.added,
+          options: problem.options.map((o) => ({
+            id: o.id,
+            label: o.label,
+            selected: o.selected,
+          })),
+        })),
+        planSignedOn,
         diagnosis: template.primaryDiagnosis,
         hospitalDay: panelPatient.hospitalDay,
         roundsCompleted: patient.roundsCompleted,
         minimumRounds: template.minimumRoundsBeforeDischarge,
         vitals,
+        answeredToday: prompt
+          ? hasAnsweredPromptOn(database, patient.id, prompt.id, session.today)
+          : false,
         prompt: prompt
           ? {
               id: prompt.id,

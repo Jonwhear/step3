@@ -37,6 +37,7 @@ import { introduceConcepts, updateConceptMastery } from "@/domain/mastery";
 import {
   acceptHandoffPatient,
   advancePatientAfterRounds,
+  hasAnsweredPromptOn,
   completeAdmission,
   dischargePatient,
   getPatient,
@@ -306,9 +307,6 @@ export async function submitPromptAction(
   const patient = getPatient(database, patientId);
   if (!patient) return { status: "idle", error: "Patient not found." };
 
-  const template = getCaseById(database, patient.caseId);
-  if (!template) return { status: "idle", error: "Case not found." };
-
   const allPrompts = [
     ...getCasePrompts(database, patient.caseId, "ROUNDS"),
     ...getCasePrompts(database, patient.caseId, "DISCHARGE"),
@@ -318,8 +316,19 @@ export async function submitPromptAction(
   const prompt = allPrompts.find((p) => p.id === promptId);
   if (!prompt) return { status: "idle", error: "Prompt not found." };
 
-  const grade = gradePromptResponse(prompt, response);
   const today = todayIso();
+
+  // A patient stays on the rounds list until the learner finishes with them, so
+  // the same question is reachable twice in one day. Answering it twice would
+  // record two responses and move mastery twice off one piece of knowledge.
+  if (hasAnsweredPromptOn(database, patient.id, prompt.id, today)) {
+    return {
+      status: "idle",
+      error: "You have already answered this question today.",
+    };
+  }
+
+  const grade = gradePromptResponse(prompt, response);
 
   recordPromptResponse(database, patient.id, prompt.id, prompt.stage, response, grade.correct);
   recordStudyEvent(database, {
@@ -341,25 +350,10 @@ export async function submitPromptAction(
     }`;
   }
 
-  // Rounds prompts advance the patient; discharge is a separate action.
-  if (prompt.stage === "ROUNDS") {
-    const roundsPrompts = getCasePrompts(database, patient.caseId, "ROUNDS");
-    advancePatientAfterRounds(
-      database,
-      patient,
-      roundsPrompts.length,
-      template.minimumRoundsBeforeDischarge,
-      today,
-    );
-    recordStudyEvent(database, {
-      eventType: "ROUND_COMPLETED",
-      patientInstanceId: patient.id,
-      caseId: patient.caseId,
-      date: today,
-    });
-  } else {
-    touchPatient(database, patient, today);
-  }
+  // The round itself is closed by finishRoundsAction, not by answering: the
+  // question is one part of the encounter, and the learner may still want to
+  // read results or revise the plan before signing off on the patient.
+  touchPatient(database, patient, today);
 
   // Deliberately no revalidate here: the grading is already persisted, and
   // refreshing now would remount this prompt and discard the feedback the
@@ -626,6 +620,43 @@ export async function signPlanAction(
     missedProblems: score.missedProblems,
     note: renderPlanAsNote(buildChart(database, patient.id, patient.caseId)),
   };
+}
+
+/**
+ * Closes out one patient on rounds: records the encounter, advances the prompt
+ * cursor so tomorrow asks something new, and promotes the patient to
+ * discharge-eligible once they have had enough rounds.
+ *
+ * Idempotent for the day. A learner who reaches this twice — a double tap, a
+ * revisit after a refresh — does not get two rounds counted against a case that
+ * only has so many questions in it.
+ */
+export async function finishRoundsAction(formData: FormData): Promise<void> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const database = db();
+  const patient = getPatient(database, patientId);
+  if (!patient) return;
+
+  const today = todayIso();
+  if (patient.lastRoundsDate === today) return;
+
+  const template = getCaseById(database, patient.caseId);
+  if (!template) return;
+
+  advancePatientAfterRounds(
+    database,
+    patient,
+    getCasePrompts(database, patient.caseId, "ROUNDS").length,
+    template.minimumRoundsBeforeDischarge,
+    today,
+  );
+  recordStudyEvent(database, {
+    eventType: "ROUND_COMPLETED",
+    patientInstanceId: patient.id,
+    caseId: patient.caseId,
+    date: today,
+  });
+  revalidateAll();
 }
 
 /* -------------------------------- discharge ------------------------------- */

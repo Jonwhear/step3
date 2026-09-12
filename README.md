@@ -64,7 +64,7 @@ Implemented:
 | Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (228) | ✅ |
+| Automated tests (233) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -84,7 +84,7 @@ User Profile + Rotation Schedule
 Active Panel       Lectures
       │
       ├─ Handoff     (receptive — introduces concepts)
-      ├─ Rounds      (retrieval — spaced repetition)
+      ├─ Rounds      (retrieval + charting — one page per patient)
       ├─ Admission   (application — controlled action vocabulary)
       └─ Discharge   (consolidation)
              │
@@ -180,7 +180,7 @@ conference. Normal pacing starts the following day.
 | Screen | Path |
 |---|---|
 | Service — the ward *is* the patient list | `/` |
-| Patient chart (Summary · Handoff · Results · Chart · Rounds · Course) | `/patients/<id>` |
+| Patient chart (Summary · Results · Rounds · Chart) | `/patients/<id>` |
 | EMR labs and imaging | `/patients/<id>?tab=results` |
 | Assessment & Plan | `/patients/<id>?tab=chart` |
 | ED board — admit a diagnosis you choose | `/admissions` |
@@ -614,6 +614,38 @@ Imaging renders as a radiology report: study and time, then IMPRESSION, then
 FINDINGS. `image_asset_path` exists and is null everywhere; when an image is
 attached the component already renders it.
 
+## 11b-2. The rounds encounter
+
+One patient, one page, in the order a real encounter happens: look at the
+patient, answer what today asks, write only if you decided something, sign off,
+walk to the next room. Nothing in that sequence sends the learner to another
+screen and back — the assessment and plan is rendered inside the stop.
+
+Two rules keep the work proportional to the medicine:
+
+- **The stop says what is outstanding before it asks for anything.** A patient
+  whose question is answered and whose plan is already on file reads "Nothing
+  outstanding", and the learner is not made to open a chart to prove it.
+- **A plan on file carries forward.** Only a patient with *no* plan at all is
+  asked to write one; for everyone else the plan is collapsed behind the date it
+  was last signed, with a Revise link. Charting is a response to a decision, not
+  a daily toll.
+
+**The round closes on "Finish with …", not on answering.** That is what makes
+the sequence above possible: the patient stays on the rounds list for the whole
+encounter, so results can be read and the plan revised after the question. Two
+consequences are handled explicitly:
+
+- The same question is reachable twice in a day, so `hasAnsweredPromptOn`
+  refuses a second answer — one piece of knowledge must not move mastery twice.
+  A resumed encounter shows "already been answered" instead of the question.
+- `finishRoundsAction` is idempotent for the day, so a double tap or a refresh
+  mid-save does not spend two rounds of a case that only has so many questions.
+
+`lastPlanSignedDate` is read from the study-event log rather than a column on
+the patient: signing is already recorded there, and a derived answer cannot
+drift from its own audit trail.
+
 ## 11c. Assessment & Plan
 
 The learner builds a note by selecting from case-authored options rather than
@@ -628,6 +660,8 @@ exercises the real decision — which problems exist and what belongs under each
 - **Grading happens on Sign, not on each tick**, so a half-built plan carries
   no penalty and can be revised freely.
 - `renderPlanAsNote` produces the note-like text shown back to the learner.
+- The same component (`components/emr/AssessmentPlan`) serves the Chart tab and
+  the rounds stop, so there is one plan editor rather than two that can drift.
 
 ## 11d. Content provenance and the coverage audit
 
@@ -865,7 +899,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-228 tests across 16 files. Every test runs against a real in-memory SQLite
+233 tests across 17 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -885,7 +919,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (163 tests):**
+**V2 suites (168 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped
@@ -925,6 +959,10 @@ mocks of the domain layer.
   out-of-range or malformed value never reaches the scheduler (including a JSON
   array, which would otherwise be read by numeric index), and a saved interval
   changes when a concept next comes back.
+- `tests/roundsFlow.test.ts` — a question counts as answered only for that
+  patient, prompt and day; a patient stays on the rounds list until the round is
+  finished and comes back tomorrow with the cursor moved on; and the plan on
+  file is dated from the most recent signing, per patient.
 - `tests/serviceLabel.test.ts` — the top bar names the rotation as a phrase:
   an off-service day reads "General Service", not "General / Off-Service
   Service", and a rotation already named "… Service" is not given a second one.

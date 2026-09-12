@@ -172,7 +172,7 @@ export function PromptCard({
                 player.stop();
                 onContinue();
               }}
-              className="h-12 w-full rounded-lg bg-ink-900 text-sm font-semibold text-white dark:bg-ink-200 dark:text-ink-900"
+              className="h-12 w-full rounded-lg bg-ink-900 text-sm font-semibold text-surface"
             >
               {continueLabel}
             </button>

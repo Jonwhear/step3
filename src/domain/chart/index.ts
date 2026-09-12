@@ -11,11 +11,11 @@
  * carries no penalty.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
 import { CLASSIFICATION_SCORE, type Classification } from "@/domain/constants";
-import { nowIso } from "@/lib/date";
+import { nowIso, type IsoDate } from "@/lib/date";
 
 export interface PlanOptionView {
   id: string;
@@ -98,6 +98,34 @@ export function buildChart(db: Db, patientId: string, caseId: string): ProblemVi
       selected: selected.has(option.id),
     })),
   }));
+}
+
+/**
+ * The day this patient's plan was last signed, or null if it never has been.
+ *
+ * Read from the study-event log rather than a column on the patient: signing is
+ * already recorded there, and a derived answer cannot drift from the audit
+ * trail the way a duplicated flag would.
+ *
+ * Rounds uses this to decide whether the learner *has* to write a note. A plan
+ * already on file is carried forward silently; only a patient with no plan at
+ * all is asked for one, so charting stays a response to a decision rather than
+ * a daily toll.
+ */
+export function lastPlanSignedDate(db: Db, patientId: string): IsoDate | null {
+  const row = db
+    .select({ eventDate: t.studyEvent.eventDate })
+    .from(t.studyEvent)
+    .where(
+      and(
+        eq(t.studyEvent.patientInstanceId, patientId),
+        eq(t.studyEvent.eventType, "PLAN_SIGNED"),
+      ),
+    )
+    .orderBy(desc(t.studyEvent.eventDate))
+    .limit(1)
+    .get();
+  return row?.eventDate ?? null;
 }
 
 export function addProblem(db: Db, patientId: string, problemId: string): void {

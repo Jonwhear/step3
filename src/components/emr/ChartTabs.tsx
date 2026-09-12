@@ -9,15 +9,19 @@
 
 import Link from "next/link";
 
-export type ChartTab = "summary" | "handoff" | "results" | "chart" | "rounds" | "course";
+/**
+ * Tab order follows the working order of a day: read the patient, read the
+ * data, round, then write. The sign-out lives inside Summary rather than in a
+ * tab of its own — it is part of who this patient is on arrival, not a
+ * separate record.
+ */
+export type ChartTab = "summary" | "results" | "rounds" | "chart";
 
 export const CHART_TAB_LABELS: Record<ChartTab, string> = {
   summary: "Summary",
-  handoff: "Handoff",
   results: "Results",
-  chart: "Chart",
   rounds: "Rounds",
-  course: "Hospital course",
+  chart: "Chart",
 };
 
 export function ChartTabs({

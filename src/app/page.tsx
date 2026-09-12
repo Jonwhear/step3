@@ -8,7 +8,7 @@ import { CensusBoard } from "@/components/hospital/CensusBoard";
 import { buildProgressSummary } from "@/domain/progress";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
-import { formatCompactDate, formatLongDate, formatShortDate } from "@/lib/date";
+import { formatCompactDate, formatLongDate } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,6 @@ export default function HomePage() {
   if (!session.onboarded) redirect("/onboarding");
 
   const progress = buildProgressSummary(db(), session.today);
-  const profile = session.profile;
 
   const work = [
     {
@@ -71,19 +70,6 @@ export default function HomePage() {
             <span className="sm:hidden">{formatCompactDate(session.today)}</span>
             {` · ${session.rotation.serviceLabel}`}
           </>
-        }
-        meta={
-          profile ? (
-            <>
-              <p className="truncate text-xs font-medium text-ink-700">
-                {profile.name}
-                {profile.degree ? `, ${profile.degree}` : ""}
-              </p>
-              <p className="truncate text-[11px] text-ink-500">
-                Step 3 · {formatShortDate(profile.step3Date)}
-              </p>
-            </>
-          ) : null
         }
       />
       <PageShell>
