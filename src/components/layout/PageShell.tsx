@@ -1,16 +1,13 @@
 import type { ReactNode } from "react";
-import { APP_CONFIG } from "@/config/app";
 
-/** Standard page frame: constrained width, bottom-nav clearance, disclaimer. */
+/**
+ * Standard page frame: constrained width, bottom-nav clearance.
+ *
+ * Nothing is appended here. A global footer repeating the same disclaimer on
+ * every screen was pure chrome — the learner read it once and then scrolled
+ * past it forever — so the educational-use statement is stated once, during
+ * onboarding, and the app itself stays free of standing boilerplate.
+ */
 export function PageShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="mx-auto max-w-3xl px-4 pb-28 pt-4">
-      {children}
-      <footer className="mt-10 border-t border-ink-200 pt-4">
-        <p className="text-[11px] leading-relaxed text-ink-400">
-          {APP_CONFIG.educationalDisclaimer}
-        </p>
-      </footer>
-    </div>
-  );
+  return <div className="mx-auto max-w-3xl px-4 pb-28 pt-4">{children}</div>;
 }

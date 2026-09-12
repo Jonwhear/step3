@@ -37,7 +37,7 @@ export default function ContentLibraryPage() {
 
   return (
     <>
-      <AppHeader rotationName="Content library" />
+      <AppHeader subtitle="Content library" />
       <PageShell>
         <Link href="/settings" className="text-xs font-medium text-clinical-600">
           ‹ Settings

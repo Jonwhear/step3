@@ -32,6 +32,9 @@ export default function OnboardingPage() {
           about your training and your exam plan, and we will build a patient
           panel around it.
         </p>
+        <p className="mt-3 text-xs leading-relaxed text-ink-400">
+          {APP_CONFIG.educationalDisclaimer}
+        </p>
       </header>
 
       <section>

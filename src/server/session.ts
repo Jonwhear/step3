@@ -30,7 +30,7 @@ import {
   type AudioPreferences,
   type CurrentRotation,
 } from "@/domain/profile";
-import { buildFloorMap, type RoomView } from "@/domain/rooms";
+import { buildFloorMap, composeCensus, type CensusBed } from "@/domain/rooms";
 import {
   bootstrapNewUserService,
   daysSinceLastSchedulerRun,
@@ -73,8 +73,18 @@ export interface DailySession {
   lecture: LectureView | null;
   /** Days away since the last scheduler run, for the neutral welcome message. */
   daysAway: number | null;
-  /** Inpatient floor, in room order, for the census map (spec §28). */
-  floor: RoomView[];
+  /**
+   * The inpatient floor in room order, each bed carrying its occupant's full
+   * panel entry. This is the *only* representation of the service: the screen
+   * shows the ward, not a ward plus a redundant list beside it.
+   */
+  census: CensusBed<PanelPatient>[];
+  /**
+   * Panel patients who hold no inpatient bed — an ED bay, typically. They are
+   * still the learner's patients, so they must never fall out of the board
+   * just because the floor map does not model their location.
+   */
+  offFloor: PanelPatient[];
   /**
    * Why the service is empty, when it is. Never null-and-silent: spec §66
    * requires the app to say why there is no work rather than showing a blank
@@ -173,6 +183,10 @@ export function loadDailySession(): DailySession {
     rows.map((row) => toPanelPatient(row, getCaseById(database, row.caseId), today));
 
   const panel = decorate(listActivePanel(database));
+  const { beds: census, offFloor } = composeCensus(
+    onboarded ? buildFloorMap(database, { today }) : [],
+    panel,
+  );
   const lectureId = getScheduledLectureId(database, today);
   const hasContent = listCases(database).length > 0;
 
@@ -189,7 +203,8 @@ export function loadDailySession(): DailySession {
     dischargeReady: decorate(listByState(database, "DISCHARGE_ELIGIBLE")),
     lecture: lectureId ? getLecture(database, lectureId) : null,
     daysAway,
-    floor: onboarded ? buildFloorMap(database, { today }) : [],
+    census,
+    offFloor,
     emptyServiceReason:
       onboarded && panel.length === 0
         ? describeEmptyService(database, today, hasContent)

@@ -85,6 +85,12 @@ export function formatLongDate(iso: IsoDate): string {
   return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+/** e.g. "Tue, Sep 8" — the long date where there is no room for it. */
+export function formatCompactDate(iso: IsoDate): string {
+  const d = parseIsoDate(iso);
+  return `${WEEKDAYS[d.getDay()]?.slice(0, 3)}, ${MONTHS[d.getMonth()]?.slice(0, 3)} ${d.getDate()}`;
+}
+
 /** e.g. "Sep 8, 2026". */
 export function formatShortDate(iso: IsoDate): string {
   const d = parseIsoDate(iso);

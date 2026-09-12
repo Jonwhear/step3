@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INPATIENT_ROOM_COUNT, INPATIENT_UNIT } from "@/config/hospital";
 import {
   buildFloorMap,
+  composeCensus,
   countAvailableInpatientRooms,
   findAvailableRoom,
   getOccupancy,
@@ -189,6 +190,66 @@ describe("hospital rooms", () => {
     expect(map.length).toBe(INPATIENT_ROOM_COUNT);
     expect(map.filter((r) => r.patient).length).toBe(1);
     expect(map.filter((r) => r.status === "EMPTY").length).toBe(INPATIENT_ROOM_COUNT - 1);
+  });
+});
+
+/*
+ * The service screen shows one board rather than a patient list above a floor
+ * map, so the join between the two has to be exact: every panel patient must
+ * appear exactly once, whether or not the floor knows where they are.
+ */
+describe("composeCensus", () => {
+  const room = (id: string, patientId: string | null) => ({
+    id,
+    unit: INPATIENT_UNIT,
+    roomNumber: id.slice(-3),
+    roomType: "INPATIENT",
+    status: (patientId ? "OCCUPIED" : "EMPTY") as "OCCUPIED" | "EMPTY",
+    patient: patientId
+      ? {
+          id: patientId,
+          name: "Test Patient",
+          surname: "Patient",
+          initials: "TP",
+          state: "ON_SERVICE",
+          roundsDue: false,
+        }
+      : null,
+  });
+
+  it("puts each panel patient in their own bed", () => {
+    const panel = [{ id: "p1" }, { id: "p2" }];
+    const { beds, offFloor } = composeCensus(
+      [room("r401", "p1"), room("r402", null), room("r403", "p2")],
+      panel,
+    );
+
+    expect(beds.map((b) => b.patient?.id ?? null)).toEqual(["p1", null, "p2"]);
+    expect(offFloor).toEqual([]);
+  });
+
+  it("keeps the number and order of beds, so the floor still reads as a floor", () => {
+    const { beds } = composeCensus([room("r401", null), room("r402", null)], []);
+    expect(beds.map((b) => b.roomNumber)).toEqual(["401", "402"]);
+    expect(beds.every((b) => b.patient === null)).toBe(true);
+  });
+
+  it("surfaces a panel patient who holds no bed on this floor", () => {
+    // An ED bay, for instance: the floor map only covers the inpatient unit.
+    const { beds, offFloor } = composeCensus([room("r401", "p1")], [
+      { id: "p1" },
+      { id: "p2" },
+    ]);
+
+    expect(beds).toHaveLength(1);
+    expect(offFloor.map((p) => p.id)).toEqual(["p2"]);
+  });
+
+  it("leaves a bed empty when its occupant is not on the active panel", () => {
+    // Defensive: a stale occupancy row must not render a card with no data.
+    const { beds, offFloor } = composeCensus([room("r401", "ghost")], []);
+    expect(beds[0]?.patient).toBeNull();
+    expect(offFloor).toEqual([]);
   });
 });
 

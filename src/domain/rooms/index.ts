@@ -173,6 +173,39 @@ export function buildFloorMap(
   });
 }
 
+/** One bed on the floor, with whoever is in it. */
+export interface CensusBed<P> {
+  roomId: string;
+  roomNumber: string;
+  status: RoomView["status"];
+  patient: P | null;
+}
+
+/**
+ * Joins the floor map to the active panel, so a single card can carry both the
+ * bed and its occupant instead of the screen showing a list and a map of the
+ * same people.
+ *
+ * Panel patients with no bed on this floor come back separately rather than
+ * being dropped: they are still the learner's patients, and a board that
+ * silently omits one is worse than a board that says where it is.
+ */
+export function composeCensus<P extends { id: string }>(
+  rooms: readonly RoomView[],
+  panel: readonly P[],
+): { beds: CensusBed<P>[]; offFloor: P[] } {
+  const byId = new Map(panel.map((patient) => [patient.id, patient]));
+  const beds = rooms.map((room) => ({
+    roomId: room.id,
+    roomNumber: room.roomNumber,
+    status: room.status,
+    patient: room.patient ? (byId.get(room.patient.id) ?? null) : null,
+  }));
+
+  const placed = new Set(beds.flatMap((bed) => (bed.patient ? [bed.patient.id] : [])));
+  return { beds, offFloor: panel.filter((patient) => !placed.has(patient.id)) };
+}
+
 /**
  * Lowest-numbered free room of the requested kind, or null when the unit is
  * full. Deterministic by construction — no jitter, no randomness — so the same

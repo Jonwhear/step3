@@ -52,7 +52,7 @@ export default async function CaseEditorPage({
 
   return (
     <>
-      <AppHeader rotationName="Case editor" />
+      <AppHeader subtitle="Case editor" />
       <PageShell>
         <Link href="/settings/content" className="text-xs font-medium text-clinical-600">
           ‹ Content library

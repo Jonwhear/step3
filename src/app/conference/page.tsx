@@ -29,7 +29,7 @@ export default async function ConferencePage({
   if (all.length === 0) {
     return (
       <>
-        <AppHeader rotationName={`${session.rotation.name} Service`} />
+        <AppHeader subtitle={session.rotation.serviceLabel} />
         <PageShell>
           <h1 className="mb-4 text-lg font-semibold text-ink-900">Teaching Conference</h1>
           <EmptyState
@@ -43,7 +43,7 @@ export default async function ConferencePage({
 
   return (
     <>
-      <AppHeader rotationName={`${session.rotation.name} Service`} />
+      <AppHeader subtitle={session.rotation.serviceLabel} />
       <PageShell>
         <header className="mb-4">
           <h1 className="text-lg font-semibold text-ink-900">Teaching Conference</h1>

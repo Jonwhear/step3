@@ -127,7 +127,7 @@ export function LecturePlayer({ lecture, audio }: LecturePlayerProps) {
           <Card
             key={section.id}
             className={`p-4 ${
-              isActive ? "border-clinical-300 ring-1 ring-clinical-200" : ""
+              isActive ? "border-clinical-200 ring-1 ring-clinical-200" : ""
             }`}
           >
             <button

@@ -35,7 +35,7 @@ export default function AdmissionsPage() {
   if (!waiting) {
     return (
       <>
-        <AppHeader rotationName={`${session.rotation.name} Service`} />
+        <AppHeader subtitle={session.rotation.serviceLabel} />
         <PageShell>
           <header className="mb-4">
             <h1 className="text-lg font-semibold text-ink-900">Admissions</h1>
@@ -116,7 +116,7 @@ export default function AdmissionsPage() {
 
   return (
     <>
-      <AppHeader rotationName={`${session.rotation.name} Service`} />
+      <AppHeader subtitle={session.rotation.serviceLabel} />
       <PageShell>
         <header className="mb-4">
           <h1 className="text-lg font-semibold text-ink-900">Admission</h1>

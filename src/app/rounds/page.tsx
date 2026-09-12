@@ -91,7 +91,7 @@ export default function RoundsPage() {
 
   return (
     <>
-      <AppHeader rotationName={`${session.rotation.name} Service`} />
+      <AppHeader subtitle={session.rotation.serviceLabel} />
       <PageShell>
         <header className="mb-4">
           <h1 className="text-lg font-semibold text-ink-900">Rounds</h1>

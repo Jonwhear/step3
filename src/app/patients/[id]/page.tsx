@@ -162,7 +162,7 @@ export default async function PatientPage({
 
   return (
     <>
-      <AppHeader rotationName="Patient chart" />
+      <AppHeader subtitle="Patient chart" />
 
       <PatientHeader
         visual={visual}

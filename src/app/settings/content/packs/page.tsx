@@ -28,7 +28,7 @@ export default async function PacksPage({
 
   return (
     <>
-      <AppHeader rotationName="Content packs" />
+      <AppHeader subtitle="Content packs" />
       <PageShell>
         <Link href="/settings/content" className="text-xs font-medium text-clinical-600">
           ‹ Content library

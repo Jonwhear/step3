@@ -53,7 +53,7 @@ export default function DeveloperPage() {
 
   return (
     <>
-      <AppHeader rotationName="Developer" />
+      <AppHeader subtitle="Developer" />
       <PageShell>
         <Link href="/settings" className="text-xs font-medium text-clinical-600">
           ‹ Settings

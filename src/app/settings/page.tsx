@@ -40,7 +40,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <AppHeader rotationName="Settings" />
+      <AppHeader subtitle="Settings" />
       <PageShell>
         <h1 className="mb-4 text-lg font-semibold text-ink-900">Settings</h1>
 

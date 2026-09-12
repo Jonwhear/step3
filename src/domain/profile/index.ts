@@ -19,6 +19,19 @@ export interface CurrentRotation {
   startDate: IsoDate | null;
   endDate: IsoDate | null;
   isOffService: boolean;
+  /** How the rotation is named on screen. */
+  serviceLabel: string;
+}
+
+/**
+ * Off-service days read "General Service" rather than "General / Off-Service
+ * Service", and a rotation the user already named "… Service" is not given a
+ * second one.
+ */
+function serviceLabelFor(name: string, isOffService: boolean): string {
+  if (isOffService) return "General Service";
+  const trimmed = name.trim();
+  return /\bservice$/i.test(trimmed) ? trimmed : `${trimmed} Service`;
 }
 
 export function getProfile(db: Db): t.UserProfileRow | null {
@@ -109,6 +122,7 @@ export function getCurrentRotation(db: Db, date: IsoDate = todayIso()): CurrentR
       startDate: null,
       endDate: null,
       isOffService: true,
+      serviceLabel: serviceLabelFor(OFF_SERVICE_ROTATION.name, true),
     };
   }
   return {
@@ -118,6 +132,7 @@ export function getCurrentRotation(db: Db, date: IsoDate = todayIso()): CurrentR
     startDate: match.startDate,
     endDate: match.endDate,
     isOffService: false,
+    serviceLabel: serviceLabelFor(match.name, false),
   };
 }
 

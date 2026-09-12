@@ -1,16 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { APP_CONFIG } from "@/config/app";
 import { INPATIENT_UNIT } from "@/config/hospital";
 import { Card, SectionHeading } from "@/components/ui";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
-import { FloorMap } from "@/components/hospital/FloorMap";
-import { PatientCard } from "@/components/patient/PatientCard";
+import { CensusBoard } from "@/components/hospital/CensusBoard";
 import { buildProgressSummary } from "@/domain/progress";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
-import { formatLongDate, formatShortDate } from "@/lib/date";
+import { formatCompactDate, formatLongDate, formatShortDate } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -64,42 +62,48 @@ export default function HomePage() {
 
   return (
     <>
-      <AppHeader rotationName={`${session.rotation.name} Service`} />
+      <AppHeader
+        subtitle={
+          <>
+            {/* The full date where it fits; an unambiguous short one where it
+                does not, rather than a truncated "Saturday, Septem…". */}
+            <span className="hidden sm:inline">{formatLongDate(session.today)}</span>
+            <span className="sm:hidden">{formatCompactDate(session.today)}</span>
+            {` · ${session.rotation.serviceLabel}`}
+          </>
+        }
+        meta={
+          profile ? (
+            <>
+              <p className="truncate text-xs font-medium text-ink-700">
+                {profile.name}
+                {profile.degree ? `, ${profile.degree}` : ""}
+              </p>
+              <p className="truncate text-[11px] text-ink-500">
+                Step 3 · {formatShortDate(profile.step3Date)}
+              </p>
+            </>
+          ) : null
+        }
+      />
       <PageShell>
-        {/* --- identity block --------------------------------------------- */}
-        <Card className="p-4">
-          <p className="text-xs text-ink-500">{formatLongDate(session.today)}</p>
-          <h1 className="mt-0.5 text-lg font-semibold text-ink-900">
-            {session.rotation.name} Service
-          </h1>
-          <p className="mt-1 text-sm text-ink-600">
-            {profile?.name}
-            {profile?.degree ? `, ${profile.degree}` : ""}
-            {profile?.specialty ? ` · ${profile.specialty}` : ""}
+        {session.rotation.isOffService ? (
+          <p className="rounded-xl border border-ink-200 bg-ink-50 p-3 text-xs text-ink-500">
+            Today falls outside your rotation schedule, so you are on the general
+            service. Add a rotation in Settings to change this.
           </p>
-          {profile ? (
-            <p className="mt-1 text-xs text-ink-400">
-              Step 3: {formatShortDate(profile.step3Date)} · {progress.daysUntilStep3} days
-            </p>
-          ) : null}
-          {session.rotation.isOffService ? (
-            <p className="mt-2 rounded-lg bg-ink-50 p-2 text-xs text-ink-500">
-              Today falls outside your rotation schedule, so you are on the
-              general service. Add a rotation in Settings to change this.
-            </p>
-          ) : null}
-        </Card>
+        ) : null}
 
         {/* --- returning after time away ---------------------------------- */}
         {session.daysAway !== null && session.daysAway >= 2 ? (
-          <div className="mt-3 rounded-xl border border-clinical-200 bg-clinical-50 p-3 text-sm text-clinical-700">
+          <div className="rounded-xl border border-clinical-200 bg-clinical-50 p-3 text-sm text-clinical-700">
             Welcome back. Your service has been adjusted to keep your Step 3 plan
             on pace.
           </div>
         ) : null}
 
         {/* --- today's work ----------------------------------------------- */}
-        <section className="mt-6">
+        <section className="mt-4 first:mt-0">
           <SectionHeading>Today</SectionHeading>
           <Card className="divide-y divide-ink-100">
             {work.map((item) => (
@@ -122,52 +126,42 @@ export default function HomePage() {
           </Card>
         </section>
 
-        {/* --- active panel ------------------------------------------------ */}
+        {/* --- the service, as the ward ------------------------------------ */}
         <section className="mt-6">
-          <SectionHeading
-            action={
-              <Link href="/patients" className="text-xs font-medium text-clinical-600">
-                History ›
-              </Link>
-            }
-          >
-            Your service — {session.panel.length} patient
-            {session.panel.length === 1 ? "" : "s"}
-          </SectionHeading>
-
           {session.emptyServiceReason ? (
             // Spec §66: never an unexplained empty service.
-            <Card className="p-6 text-center">
-              <p className="text-sm font-medium text-ink-800">
-                {session.emptyServiceReason.title}
-              </p>
-              <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">
-                {session.emptyServiceReason.body}
-              </p>
-              {session.emptyServiceReason.action ? (
-                <Link
-                  href={session.emptyServiceReason.action.href}
-                  className="mt-4 inline-flex h-11 items-center rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700"
-                >
-                  {session.emptyServiceReason.action.label}
-                </Link>
-              ) : null}
-            </Card>
+            <>
+              <SectionHeading>Your service</SectionHeading>
+              <Card className="p-6 text-center">
+                <p className="text-sm font-medium text-ink-800">
+                  {session.emptyServiceReason.title}
+                </p>
+                <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">
+                  {session.emptyServiceReason.body}
+                </p>
+                {session.emptyServiceReason.action ? (
+                  <Link
+                    href={session.emptyServiceReason.action.href}
+                    className="mt-4 inline-flex h-11 items-center rounded-lg border border-ink-200 px-4 text-sm font-medium text-ink-700"
+                  >
+                    {session.emptyServiceReason.action.label}
+                  </Link>
+                ) : null}
+              </Card>
+            </>
           ) : (
-            <div className="space-y-2">
-              {session.panel.map((patient) => (
-                <PatientCard key={patient.id} patient={patient} />
-              ))}
-            </div>
+            <CensusBoard
+              beds={session.census}
+              offFloor={session.offFloor}
+              unitLabel={INPATIENT_UNIT}
+              action={
+                <Link href="/patients" className="text-xs font-medium text-clinical-600">
+                  History ›
+                </Link>
+              }
+            />
           )}
         </section>
-
-        {/* --- hospital census map ----------------------------------------- */}
-        {session.floor.length > 0 ? (
-          <section className="mt-6">
-            <FloorMap rooms={session.floor} unitLabel={`${INPATIENT_UNIT} — census`} />
-          </section>
-        ) : null}
 
         {/* --- subtle progress -------------------------------------------- */}
         <section className="mt-6">
@@ -212,10 +206,6 @@ export default function HomePage() {
             </p>
           </Card>
         </section>
-
-        <p className="mt-6 text-center text-[11px] text-ink-400">
-          {APP_CONFIG.hospitalShortName} · synthetic teaching content
-        </p>
       </PageShell>
     </>
   );

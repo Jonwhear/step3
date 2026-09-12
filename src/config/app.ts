@@ -11,7 +11,7 @@ export const APP_CONFIG = {
   hospitalShortName: "County General",
   appName: "Step 3 Teaching Service",
 
-  /** Shown in settings and in a subtle global footer. */
+  /** Stated once, during onboarding. */
   educationalDisclaimer:
     "This application is intended for medical education and examination preparation. It is not intended to guide the care of actual patients.",
 

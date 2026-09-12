@@ -73,7 +73,7 @@ export default async function PatientHistoryPage({
 
   return (
     <>
-      <AppHeader rotationName="Patient history" />
+      <AppHeader subtitle="Patient history" />
       <PageShell>
         <header className="mb-4">
           <h1 className="text-lg font-semibold text-ink-900">Patient history</h1>

@@ -64,7 +64,7 @@ Implemented:
 | Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (221) | ✅ |
+| Automated tests (228) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -179,7 +179,7 @@ conference. Normal pacing starts the following day.
 
 | Screen | Path |
 |---|---|
-| Service, with the floor map | `/` |
+| Service — the ward *is* the patient list | `/` |
 | Patient chart (Summary · Handoff · Results · Chart · Rounds · Course) | `/patients/<id>` |
 | EMR labs and imaging | `/patients/<id>?tab=results` |
 | Assessment & Plan | `/patients/<id>?tab=chart` |
@@ -530,6 +530,16 @@ The hospital is a small, declarative 2D schematic — not a simulation.
 plus ED bays, trauma bays, boarding and hallway slots reserved for a future ED
 flow.
 
+**The ward is the list.** The service screen renders one board, not a list of
+patients above a map of the same people: each bed card carries its occupant's
+name, working diagnosis, hospital day and what is owed today. Rounds completed
+is deliberately absent — one round per day means the hospital day already says
+it. Empty beds hold exactly one fact, so they are a row of numbers rather than
+full-height boxes of nothing, and a patient who holds no bed on this floor (an
+ED bay, say) is surfaced under "Elsewhere in the hospital" rather than
+disappearing with the map that does not model them. `composeCensus` does the
+join; `CensusBoard` draws it.
+
 **Occupancy is derived, never stored twice.** A room is occupied when an active
 patient row points at it (`patient_instance.room_id`). That makes
 double-booking impossible to represent, and discharging a patient frees their
@@ -855,7 +865,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-221 tests across 15 files. Every test runs against a real in-memory SQLite
+228 tests across 16 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -875,7 +885,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (156 tests):**
+**V2 suites (163 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped
@@ -915,6 +925,13 @@ mocks of the domain layer.
   out-of-range or malformed value never reaches the scheduler (including a JSON
   array, which would otherwise be read by numeric index), and a saved interval
   changes when a concept next comes back.
+- `tests/serviceLabel.test.ts` — the top bar names the rotation as a phrase:
+  an off-service day reads "General Service", not "General / Off-Service
+  Service", and a rotation already named "… Service" is not given a second one.
+- `composeCensus` cases in `tests/rooms.test.ts` — the service board joins the
+  floor to the panel exactly: bed order is preserved, a patient with no bed on
+  this floor is surfaced rather than dropped, and a stale occupancy row renders
+  an empty bed rather than a card with no data.
 
 ## 16. Configuration
 
@@ -964,3 +981,7 @@ stay light in dark mode.
 This application is intended for medical education and examination preparation.
 It is not intended to guide the care of actual patients. All clinical content
 currently loaded is synthetic material authored for this prototype.
+
+In the app itself this is stated once, on the onboarding screen. It used to sit
+in a footer under every screen, which meant it was read once and then scrolled
+past forever — repetition made it chrome, not a disclaimer.
