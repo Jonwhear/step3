@@ -26,18 +26,21 @@ import {
 import {
   addProblem,
   buildChart,
+  planSnapshot,
   removeProblem,
   renderPlanAsNote,
   scorePlan,
   togglePlanSelection,
 } from "@/domain/chart";
 import { describeEvidence } from "@/domain/content/provenance";
+import { recordObservations } from "@/domain/rounds";
 import { completeLecture, getLectureConceptIds, startLecture } from "@/domain/lectures";
 import { introduceConcepts, updateConceptMastery } from "@/domain/mastery";
 import {
   acceptHandoffPatient,
   advancePatientAfterRounds,
   hasAnsweredPromptOn,
+  hospitalDayOn,
   completeAdmission,
   dischargePatient,
   getPatient,
@@ -350,7 +353,7 @@ export async function submitPromptAction(
     }`;
   }
 
-  // The round itself is closed by finishRoundsAction, not by answering: the
+  // The round itself is closed by signOffRoundsAction, not by answering: the
   // question is one part of the encounter, and the learner may still want to
   // read results or revise the plan before signing off on the patient.
   touchPatient(database, patient, today);
@@ -584,6 +587,7 @@ export async function signPlanAction(
 
   const score = scorePlan(database, patient.id, patient.caseId);
   const today = todayIso();
+  const chart = buildChart(database, patient.id, patient.caseId);
 
   recordStudyEvent(database, {
     eventType: "PLAN_SIGNED",
@@ -595,6 +599,11 @@ export async function signPlanAction(
       requiredSelected: score.requiredSelected,
       requiredTotal: score.requiredTotal,
       harmfulCount: score.harmful.length,
+      // The chart record of what was signed. Written here rather than
+      // recomputed later, so revising the plan tomorrow cannot rewrite what
+      // this note said today.
+      hospitalDay: hospitalDayOn(patient, today),
+      problems: planSnapshot(chart),
     },
     date: today,
   });
@@ -618,20 +627,23 @@ export async function signPlanAction(
       feedbackText: l.feedbackText,
     })),
     missedProblems: score.missedProblems,
-    note: renderPlanAsNote(buildChart(database, patient.id, patient.caseId)),
+    note: renderPlanAsNote(chart),
   };
 }
 
 /**
- * Closes out one patient on rounds: records the encounter, advances the prompt
- * cursor so tomorrow asks something new, and promotes the patient to
- * discharge-eligible once they have had enough rounds.
+ * Signs off rounds on one patient for the current hospital day.
+ *
+ * This is the end of the encounter, and it does four things in one gesture:
+ * records today's vitals and labs so tomorrow has a prior value to show,
+ * finalises the plan into the hospital course, counts the round, and takes the
+ * patient off today's workload.
  *
  * Idempotent for the day. A learner who reaches this twice — a double tap, a
- * revisit after a refresh — does not get two rounds counted against a case that
- * only has so many questions in it.
+ * reopened chart — does not get two rounds counted against a case that only
+ * has so many questions in it, and today's recorded values are not rewritten.
  */
-export async function finishRoundsAction(formData: FormData): Promise<void> {
+export async function signOffRoundsAction(formData: FormData): Promise<void> {
   const patientId = String(formData.get("patientId") ?? "");
   const database = db();
   const patient = getPatient(database, patientId);
@@ -642,6 +654,26 @@ export async function finishRoundsAction(formData: FormData): Promise<void> {
 
   const template = getCaseById(database, patient.caseId);
   if (!template) return;
+
+  // Before the round is counted, while `hospitalDayOn` still reports the day
+  // being signed off rather than the next one.
+  recordObservations(database, patient, today);
+
+  const chart = buildChart(database, patient.id, patient.caseId);
+  const finalisedPlan = planSnapshot(chart);
+  if (finalisedPlan.length > 0) {
+    recordStudyEvent(database, {
+      eventType: "PLAN_SIGNED",
+      patientInstanceId: patient.id,
+      caseId: patient.caseId,
+      metadata: {
+        hospitalDay: hospitalDayOn(patient, today),
+        problems: finalisedPlan,
+        finalisedAtSignOff: true,
+      },
+      date: today,
+    });
+  }
 
   advancePatientAfterRounds(
     database,

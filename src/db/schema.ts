@@ -330,6 +330,36 @@ export const patientProblem = sqliteTable(
   (t) => [primaryKey({ columns: [t.patientInstanceId, t.problemId] })],
 );
 
+/**
+ * A numeric observation as it stood on one hospital day (spec V3 §13).
+ *
+ * Case content carries one value per vital and lab, so the only honest source
+ * of a *prior* value is what the learner was actually shown on an earlier day.
+ * Rounds sign-off writes that day's values here; the trend disclosure then
+ * reports history rather than inventing one. The primary key makes a day's
+ * record write-once, so re-signing cannot duplicate or rewrite it.
+ */
+export const patientObservation = sqliteTable(
+  "patient_observation",
+  {
+    patientInstanceId: text("patient_instance_id").notNull(),
+    /** Stable identity across days, e.g. "VITAL:Heart rate" or "LAB:BMP-K". */
+    observationKey: text("observation_key").notNull(),
+    label: text("label").notNull(),
+    value: text("value").notNull(),
+    units: text("units"),
+    /** The narrative day this value belongs to, never a calendar date. */
+    hospitalDay: integer("hospital_day").notNull(),
+    recordedAt: text("recorded_at").notNull().default(now),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.patientInstanceId, t.observationKey, t.hospitalDay],
+    }),
+    index("patient_observation_patient_idx").on(t.patientInstanceId, t.observationKey),
+  ],
+);
+
 export const actionDefinition = sqliteTable("action_definition", {
   id: text("id").primaryKey(),
   actionCode: text("action_code").notNull().unique(),
@@ -824,3 +854,4 @@ export type LearningPointRow = typeof learningPoint.$inferSelect;
 export type LearningPointMappingRow = typeof learningPointMapping.$inferSelect;
 export type EvidenceLinkRow = typeof evidenceLink.$inferSelect;
 export type CaseRevisionRow = typeof caseRevision.$inferSelect;
+export type PatientObservationRow = typeof patientObservation.$inferSelect;

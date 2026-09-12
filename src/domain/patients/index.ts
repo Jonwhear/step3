@@ -15,6 +15,7 @@ import {
   type PatientState,
   type StudyEventType,
 } from "@/domain/constants";
+import { caseHasRoundsTask } from "@/domain/cases";
 import { USER_ID } from "@/domain/profile";
 import { sortByRoomOrder } from "@/domain/rooms";
 import { nowIso, toIsoDate, todayIso, type IsoDate } from "@/lib/date";
@@ -138,7 +139,11 @@ export function listRoundsDue(db: Db, today: IsoDate = todayIso()): t.PatientIns
   const due = listActivePanel(db).filter(
     (p) =>
       (p.state === "ON_SERVICE" || p.state === "DISCHARGE_ELIGIBLE") &&
-      p.lastRoundsDate !== today,
+      p.lastRoundsDate !== today &&
+      // A patient whose case authors no question and no problem list has
+      // nothing to round on. Counting them as due sends the learner to an
+      // empty screen and inflates the day's workload.
+      caseHasRoundsTask(db, p.caseId),
   );
   return sortByRoomOrder(db, due);
 }
@@ -233,9 +238,38 @@ export function parseActiveDates(patient: t.PatientInstanceRow): IsoDate[] {
 /**
  * Hospital day = the number of distinct real-world dates on which the learner
  * has interacted with this patient (spec §12). Narrative only.
+ *
+ * Real-world days the learner skips do not count: a patient left on hospital
+ * day 2 is still on hospital day 2 a week later, because nothing happened to
+ * them in between.
  */
 export function hospitalDay(patient: t.PatientInstanceRow): number {
   return Math.max(1, parseActiveDates(patient).length);
+}
+
+/**
+ * The hospital day the *current* encounter belongs to.
+ *
+ * `hospitalDay` counts days already worked, so an active patient not yet
+ * touched today still reads as yesterday's day — and the number would then
+ * jump mid-encounter, the moment the first answer recorded today's date. This
+ * reports the day the learner is working on, which is stable from the moment
+ * they open the chart until they sign off.
+ *
+ * It changes nothing about advancement: the stored active dates are untouched,
+ * and a skipped week still adds exactly one day when work resumes.
+ */
+export function hospitalDayOn(
+  patient: t.PatientInstanceRow,
+  today: IsoDate = todayIso(),
+): number {
+  const dates = parseActiveDates(patient);
+  if (dates.includes(today)) return Math.max(1, dates.length);
+  // A discharged or archived patient has no current day; report what happened.
+  if (!ACTIVE_PANEL_STATES.includes(patient.state as PatientState)) {
+    return Math.max(1, dates.length);
+  }
+  return Math.max(1, dates.length + 1);
 }
 
 /** Records an interaction today, advancing the narrative hospital day if new. */

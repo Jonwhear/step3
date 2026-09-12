@@ -17,6 +17,34 @@ import {
 } from "@/domain/constants";
 import { matchShortAnswer } from "@/domain/actions";
 
+/**
+ * Whether this case authors any daily work at all — a rounds question or a
+ * problem list to plan against.
+ *
+ * A case with neither has nothing to ask on rounds, and reporting such a
+ * patient as "rounds due" every day is how the workload screen ends up lying
+ * to the learner.
+ */
+export function caseHasRoundsTask(db: Db, caseId: string): boolean {
+  const hasPrompt =
+    db
+      .select({ id: t.casePrompt.id })
+      .from(t.casePrompt)
+      .where(and(eq(t.casePrompt.caseId, caseId), eq(t.casePrompt.stage, "ROUNDS")))
+      .limit(1)
+      .get() !== undefined;
+  if (hasPrompt) return true;
+
+  return (
+    db
+      .select({ id: t.caseProblem.id })
+      .from(t.caseProblem)
+      .where(eq(t.caseProblem.caseId, caseId))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
 export function getCaseById(db: Db, caseId: string): t.CaseTemplateRow | null {
   return db.select().from(t.caseTemplate).where(eq(t.caseTemplate.id, caseId)).get() ?? null;
 }

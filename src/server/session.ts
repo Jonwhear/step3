@@ -15,7 +15,7 @@ import { getCaseById, listCases } from "@/domain/cases";
 import type { PatientState } from "@/domain/constants";
 import { getLecture, type LectureView } from "@/domain/lectures";
 import {
-  hospitalDay,
+  hospitalDayOn,
   listActivePanel,
   listByState,
   listRoundsDue,
@@ -31,6 +31,7 @@ import {
   type CurrentRotation,
 } from "@/domain/profile";
 import { buildFloorMap, composeCensus, type CensusBed } from "@/domain/rooms";
+import { roundsStatusFor } from "@/domain/rounds";
 import {
   bootstrapNewUserService,
   daysSinceLastSchedulerRun,
@@ -135,6 +136,7 @@ function describeEmptyService(
 }
 
 function toPanelPatient(
+  database: Db,
   row: t.PatientInstanceRow,
   template: t.CaseTemplateRow | null,
   today: IsoDate,
@@ -148,11 +150,12 @@ function toPanelPatient(
     roomNumber: row.roomNumber,
     state: row.state as PatientState,
     entryMode: row.entryMode,
-    hospitalDay: hospitalDay(row),
+    // The day being worked, so the board and the chart never disagree.
+    hospitalDay: hospitalDayOn(row, today),
     roundsCompleted: row.roundsCompleted,
-    roundsDueToday:
-      (row.state === "ON_SERVICE" || row.state === "DISCHARGE_ELIGIBLE") &&
-      row.lastRoundsDate !== today,
+    // "Rounds due" has to mean there is work: a case with no question and no
+    // problem list is not overdue, it has nothing to ask.
+    roundsDueToday: roundsStatusFor(database, row, today) === "DUE",
     diagnosis: revealed ? (template?.primaryDiagnosis ?? null) : null,
     caseTitle: template?.title ?? "Unknown case",
     caseCode: template?.code ?? "",
@@ -180,7 +183,7 @@ export function loadDailySession(): DailySession {
   }
 
   const decorate = (rows: t.PatientInstanceRow[]) =>
-    rows.map((row) => toPanelPatient(row, getCaseById(database, row.caseId), today));
+    rows.map((row) => toPanelPatient(database, row, getCaseById(database, row.caseId), today));
 
   const panel = decorate(listActivePanel(database));
   const { beds: census, offFloor } = composeCensus(

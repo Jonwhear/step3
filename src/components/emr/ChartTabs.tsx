@@ -10,18 +10,18 @@
 import Link from "next/link";
 
 /**
- * Tab order follows the working order of a day: read the patient, read the
- * data, round, then write. The sign-out lives inside Summary rather than in a
- * tab of its own — it is part of who this patient is on arrival, not a
- * separate record.
+ * Two tabs, because there are two things a learner does with a patient: read
+ * them, and work them.
+ *
+ * Results had its own tab once. It is now part of rounds — a potassium is read
+ * in order to decide something, and putting the number a tap away from the
+ * decision made the learner carry it in their head.
  */
-export type ChartTab = "summary" | "results" | "rounds" | "chart";
+export type ChartTab = "summary" | "rounds";
 
 export const CHART_TAB_LABELS: Record<ChartTab, string> = {
   summary: "Summary",
-  results: "Results",
   rounds: "Rounds",
-  chart: "Chart",
 };
 
 export function ChartTabs({

@@ -38,10 +38,10 @@ export function DischargeFlow({
   return (
     <div className="space-y-3">
       <Card className="border-good-200 bg-good-50 p-3">
-        <p className="text-sm font-medium text-good-700">Discharge eligible</p>
-        <p className="mt-1 text-sm text-good-700">
+        <p className="text-sm text-good-700">
           {patientName} has met the required number of rounds encounters. Settle
-          the discharge plan and send them home.
+          the discharge plan and send them home, or sign off and continue their
+          care another day.
         </p>
       </Card>
 

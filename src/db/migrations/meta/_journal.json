@@ -15,6 +15,13 @@
       "when": 1789071931039,
       "tag": "0001_v2_emr_and_content",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789247630839,
+      "tag": "0002_patient_observations",
+      "breakpoints": true
     }
   ]
 }

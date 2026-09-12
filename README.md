@@ -64,7 +64,7 @@ Implemented:
 | Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (233) | ✅ |
+| Automated tests (249) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -180,9 +180,8 @@ conference. Normal pacing starts the following day.
 | Screen | Path |
 |---|---|
 | Service — the ward *is* the patient list | `/` |
-| Patient chart (Summary · Results · Rounds · Chart) | `/patients/<id>` |
-| EMR labs and imaging | `/patients/<id>?tab=results` |
-| Assessment & Plan | `/patients/<id>?tab=chart` |
+| Patient chart (Summary · Rounds) | `/patients/<id>` |
+| Today's work: question, data, plan, sign-off | `/patients/<id>?tab=rounds` |
 | ED board — admit a diagnosis you choose | `/admissions` |
 | Content library and case editor | `/settings/content` |
 | Content coverage audit | `/settings/content/coverage` |
@@ -230,6 +229,9 @@ application, and they are not reproducible.
   `patient_instance` becomes `location_type = 'INPATIENT'` with a null room
   (backfilled at runtime), and a V1 `case_template` becomes `PUBLISHED`,
   because a V1 case was by definition live content.
+- `0002_patient_observations` adds one table and nothing else, for the same
+  reason: a value the learner saw on an earlier hospital day has to be stored
+  to be shown again.
 - `tests/migrations.test.ts` builds a database at the V1 schema, fills it with
   real user data, runs the migration chain and asserts both the row counts and
   the individual field values survive. Keep that test passing.
@@ -616,35 +618,65 @@ attached the component already renders it.
 
 ## 11b-2. The rounds encounter
 
-One patient, one page, in the order a real encounter happens: look at the
-patient, answer what today asks, write only if you decided something, sign off,
-walk to the next room. Nothing in that sequence sends the learner to another
-screen and back — the assessment and plan is rendered inside the stop.
+One patient, one page, in the order a real encounter happens:
 
-Two rules keep the work proportional to the medicine:
+```
+TODAY'S ROUNDS      the clinical question, before any data is interpreted
+CURRENT DATA        vitals, labs, imaging, history and exam as they stand today
+PLAN                the problem list and what goes under each problem
+SIGN OFF ROUNDS     the end of the day for this patient
+▸ Previous performance
+```
 
-- **The stop says what is outstanding before it asks for anything.** A patient
-  whose question is answered and whose plan is already on file reads "Nothing
-  outstanding", and the learner is not made to open a chart to prove it.
-- **A plan on file carries forward.** Only a patient with *no* plan at all is
-  asked to write one; for everyone else the plan is collapsed behind the date it
-  was last signed, with a Revise link. Charting is a response to a decision, not
-  a daily toll.
+`components/emr/RoundsEncounter` renders that for both the patient chart's
+Rounds tab and the service-wide walker at `/rounds`; `domain/rounds` assembles
+it. One component and one builder is what stops the two screens from becoming
+two subtly different ways to round.
 
-**The round closes on "Finish with …", not on answering.** That is what makes
-the sequence above possible: the patient stays on the rounds list for the whole
-encounter, so results can be read and the plan revised after the question. Two
-consequences are handled explicitly:
+**Results have no tab of their own.** A potassium is read in order to decide
+something, and a tab away from the decision made the learner carry the number in
+their head. Today's values are simply the values; nothing is labelled "current",
+because the label would be on every row.
 
-- The same question is reachable twice in a day, so `hasAnsweredPromptOn`
-  refuses a second answer — one piece of knowledge must not move mastery twice.
-  A resumed encounter shows "already been answered" instead of the question.
-- `finishRoundsAction` is idempotent for the day, so a double tap or a refresh
-  mid-save does not spend two rounds of a case that only has so many questions.
+**A rounds task is something that actually exists.** `roundsStatusFor` answers
+`DUE`, `COMPLETED_TODAY` or `NO_TASK`, and `NO_TASK` is a real answer: a case
+that authors neither a question nor a problem list has nothing to ask, so the
+patient is not reported as overdue and the workload count does not include them.
 
-`lastPlanSignedDate` is read from the study-event log rather than a column on
-the patient: signing is already recorded there, and a derived answer cannot
-drift from its own audit trail.
+**The round closes on sign-off.** `signOffRoundsAction` records today's
+observations, finalises the plan into the hospital course, counts the round and
+takes the patient off today's workload — then the chart reads "Rounds complete
+for hospital day N" and stays that way however often it is reopened. It is
+idempotent for the day, and answering the same question twice on one day is
+refused, so one piece of knowledge cannot move mastery twice.
+
+**Discharge is the same workflow, not another one.** When the case engine has
+made the patient discharge-eligible, the discharge step appears inside the
+encounter under sign-off. Eligibility is still the case engine's: the UI offers
+discharge, it never decides it.
+
+### Prior values
+
+Case content carries one value per vital and lab, so the only honest source of a
+*prior* value is what the learner was actually shown on an earlier day.
+Sign-off writes those into `patient_observation`, keyed by hospital day and
+write-once. A row then offers a disclosure only when an earlier day is on record
+**and it differs from today's value** — a column of identical numbers is not a
+trend, and nothing is ever interpolated between two recorded points.
+
+With the bundled synthetic content, values do not change from day to day, so
+these disclosures stay hidden. That is the correct behaviour rather than a
+missing feature: the alternative is inventing a trend. Content that authors
+day-varying values gets the disclosure for free.
+
+### The narrative clock
+
+Hospital day counts the distinct real-world dates the learner has *worked* this
+patient, never calendar days. A patient left on hospital day 2 is still on
+hospital day 2 a week later; resuming adds exactly one day, not the week.
+`hospitalDayOn` reports the day currently being worked, so the number is stable
+from opening the chart to signing off instead of ticking over mid-encounter, and
+the board and the chart always agree.
 
 ## 11c. Assessment & Plan
 
@@ -660,8 +692,23 @@ exercises the real decision — which problems exist and what belongs under each
 - **Grading happens on Sign, not on each tick**, so a half-built plan carries
   no penalty and can be revised freely.
 - `renderPlanAsNote` produces the note-like text shown back to the learner.
-- The same component (`components/emr/AssessmentPlan`) serves the Chart tab and
-  the rounds stop, so there is one plan editor rather than two that can drift.
+- One editor (`components/emr/AssessmentPlan`) serves every surface that edits a
+  plan, so there are not two that can drift.
+
+### The hospital course
+
+Summary shows the course problem by problem: the assessment the case authored,
+and the plan **exactly as the learner last finalised it**. Nothing is generated
+and no correctness is shown — this is the chart record, not a score.
+
+The finalised plan is read from the `PLAN_SIGNED` events themselves, each of
+which carries a snapshot of what was signed. Recomputing it from today's
+selections would let tomorrow's revision rewrite what yesterday's note said.
+
+"Resolved" is not a flag anywhere: a resolved problem is one that appears in a
+signed plan and is no longer on the active list, which is what taking a problem
+off the list means. Those collapse at the bottom, and a patient with none gets
+no control at all.
 
 ## 11d. Content provenance and the coverage audit
 
@@ -814,7 +861,7 @@ feature list.
 - **Only two bundled cases carry structured labs, imaging and a problem list.**
   Diabetic ketoacidosis (`DEMO-ENDO-001`) and community-acquired pneumonia
   (`DEMO-PULM-001`) exercise the full EMR chart. The other eighteen still use
-  V1's narrative `findings`, which render in the Results tab under
+  V1's narrative `findings`, which render under Current data as
   "Laboratory (narrative)". Upgrading them is content authoring, not
   engineering: add `labs`, `imaging` and `problems` to the case file, following
   either of those two as the template.
@@ -831,6 +878,12 @@ feature list.
   definitions, sources and learning points are modelled in the format and
   imported correctly, but `exportPack` currently emits them as empty
   collections.
+- **No bundled case changes its numbers from day to day.** The prior-value
+  disclosure on rounds is built and tested, but it only offers itself when a
+  recorded earlier value differs from today's, and synthetic content holds one
+  value per vital and lab for the whole admission. Authoring day-varying values
+  is a content change; inventing a trend at runtime is not something this app
+  will do.
 - **The ED map is modelled but not surfaced.** ED, trauma, boarding and hallway
   rooms are seeded and `buildFloorMap` accepts a unit, but only the inpatient
   floor has a screen. Patient location (`location_type`) exists so an
@@ -899,7 +952,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-233 tests across 17 files. Every test runs against a real in-memory SQLite
+249 tests across 18 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -919,7 +972,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (168 tests):**
+**V2 suites (184 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped
@@ -963,6 +1016,16 @@ mocks of the domain layer.
   patient, prompt and day; a patient stays on the rounds list until the round is
   finished and comes back tomorrow with the cursor moved on; and the plan on
   file is dated from the most recent signing, per patient.
+- `tests/chartWorkflow.test.ts` — skipped real-world days never accumulate on
+  the hospital day and the day being worked is stable; a case with no question
+  and no problem list is `NO_TASK` rather than perpetually due; sign-off marks
+  the day complete and reopening the chart does not make it due again; discharge
+  eligibility still comes from the case engine's own round count; observations
+  are write-once per day; a prior-value disclosure appears only when a stored
+  earlier value differs; the hospital course records the plan as signed and
+  moves a delisted problem to resolved; the header arrows step to the next and
+  previous occupied rooms and do not wrap; and the chart offers no Results tab,
+  collapses concepts and hides the teaching point.
 - `tests/serviceLabel.test.ts` — the top bar names the rotation as a phrase:
   an off-service day reads "General Service", not "General / Off-Service
   Service", and a rotation already named "… Service" is not given a second one.

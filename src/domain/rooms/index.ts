@@ -317,6 +317,27 @@ export function sortByRoomOrder<T extends { roomId: string | null; roomNumber: s
   });
 }
 
+/**
+ * The patients either side of this one on the service, in walking order.
+ *
+ * Empty rooms are not in the list at all — occupancy is what the list is built
+ * from — so stepping forward from 401 lands on whoever is next, 403 or 406.
+ * The ends are null rather than wrapping: the ward has a first and a last room.
+ */
+export function serviceNeighbours<T extends { id: string; roomId: string | null; roomNumber: string }>(
+  db: Db,
+  patients: readonly T[],
+  patientId: string,
+): { previous: T | null; next: T | null } {
+  const ordered = sortByRoomOrder(db, patients);
+  const index = ordered.findIndex((p) => p.id === patientId);
+  if (index === -1) return { previous: null, next: null };
+  return {
+    previous: ordered[index - 1] ?? null,
+    next: ordered[index + 1] ?? null,
+  };
+}
+
 /** Frees the room a patient is holding. Called on discharge. */
 export function releaseRoom(db: Db, patientId: string): void {
   db.update(t.patientInstance)

@@ -128,6 +128,134 @@ export function lastPlanSignedDate(db: Db, patientId: string): IsoDate | null {
   return row?.eventDate ?? null;
 }
 
+/* ----------------------------- hospital course ---------------------------- */
+
+/** One problem as it stands in the chart record, with its finalised plan. */
+export interface CourseProblem {
+  problemId: string;
+  label: string;
+  assessmentText: string;
+  isPrimary: boolean;
+  /** Plan items as they were when the plan was last finalised. */
+  planItems: string[];
+  /** The hospital day that plan was finalised on, when it is known. */
+  hospitalDay: number | null;
+  signedOn: IsoDate | null;
+}
+
+export interface HospitalCourse {
+  active: CourseProblem[];
+  /** Problems that were once on the list and have since been taken off it. */
+  resolved: CourseProblem[];
+}
+
+/** The shape stored in a PLAN_SIGNED event's metadata. */
+interface PlanSnapshot {
+  hospitalDay?: number;
+  problems?: { problemId: string; label: string; items: string[] }[];
+}
+
+/**
+ * Builds the snapshot recorded when a plan is finalised.
+ *
+ * The chart record has to survive the learner later changing their mind, so it
+ * is written out at signing rather than recomputed from today's selections.
+ */
+export function planSnapshot(
+  chart: readonly ProblemView[],
+): { problemId: string; label: string; items: string[] }[] {
+  return chart
+    .filter((problem) => problem.added)
+    .map((problem) => ({
+      problemId: problem.id,
+      label: problem.label,
+      items: problem.options.filter((o) => o.selected).map((o) => o.label),
+    }));
+}
+
+function readSnapshot(row: t.StudyEventRow): PlanSnapshot | null {
+  try {
+    const parsed: unknown = JSON.parse(row.metadataJson);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const snapshot = parsed as PlanSnapshot;
+    return Array.isArray(snapshot.problems) ? snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The hospital course: every problem this patient has carried, each with the
+ * plan as it was last finalised.
+ *
+ * Everything here is read back from what the learner actually signed. Nothing
+ * is generated, inferred, or filled in — a problem with no finalised plan
+ * simply shows no plan.
+ *
+ * "Resolved" is not a separate flag anywhere: it is a problem that was on a
+ * signed plan and is no longer on the active list, which is exactly what
+ * taking a problem off the list means.
+ */
+export function buildHospitalCourse(
+  db: Db,
+  patientId: string,
+  caseId: string,
+): HospitalCourse {
+  const problems = new Map(listCaseProblems(db, caseId).map((p) => [p.id, p]));
+  const added = listAddedProblemIds(db, patientId);
+
+  const signings = db
+    .select()
+    .from(t.studyEvent)
+    .where(
+      and(
+        eq(t.studyEvent.patientInstanceId, patientId),
+        eq(t.studyEvent.eventType, "PLAN_SIGNED"),
+      ),
+    )
+    .orderBy(asc(t.studyEvent.createdAt))
+    .all();
+
+  // Later signings overwrite earlier ones: the chart shows the plan in force.
+  const finalised = new Map<string, CourseProblem>();
+  for (const event of signings) {
+    const snapshot = readSnapshot(event);
+    if (!snapshot?.problems) continue;
+    for (const entry of snapshot.problems) {
+      const problem = problems.get(entry.problemId);
+      finalised.set(entry.problemId, {
+        problemId: entry.problemId,
+        label: problem?.label ?? entry.label,
+        assessmentText: problem?.assessmentText ?? "",
+        isPrimary: problem?.isPrimary ?? false,
+        planItems: entry.items,
+        hospitalDay: snapshot.hospitalDay ?? null,
+        signedOn: event.eventDate,
+      });
+    }
+  }
+
+  const active: CourseProblem[] = [];
+  for (const problem of listCaseProblems(db, caseId)) {
+    if (!added.has(problem.id)) continue;
+    active.push(
+      finalised.get(problem.id) ?? {
+        problemId: problem.id,
+        label: problem.label,
+        assessmentText: problem.assessmentText,
+        isPrimary: problem.isPrimary,
+        planItems: [],
+        hospitalDay: null,
+        signedOn: null,
+      },
+    );
+  }
+
+  const resolved = [...finalised.values()].filter((p) => !added.has(p.problemId));
+
+  return { active, resolved };
+}
+
 export function addProblem(db: Db, patientId: string, problemId: string): void {
   db.insert(t.patientProblem)
     .values({ patientInstanceId: patientId, problemId, addedAt: nowIso() })

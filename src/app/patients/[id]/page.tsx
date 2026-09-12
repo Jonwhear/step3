@@ -3,71 +3,41 @@ import { notFound } from "next/navigation";
 import { inArray } from "drizzle-orm";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
-import { Badge, Card, EmptyState, SectionHeading, type Tone } from "@/components/ui";
-import {
-  ChartTabs,
-  parseChartTab,
-  type ChartTab,
-} from "@/components/emr/ChartTabs";
-import { ImagingList } from "@/components/emr/ImagingReport";
-import { LabPanels } from "@/components/emr/LabPanels";
+import { Card, Disclosure, SectionHeading } from "@/components/ui";
+import { ChartTabs, parseChartTab, type ChartTab } from "@/components/emr/ChartTabs";
+import { HospitalCourse } from "@/components/emr/HospitalCourse";
 import { PatientHeader } from "@/components/emr/PatientHeader";
-import { listActions } from "@/domain/actions";
-import { buildChart } from "@/domain/chart";
-import {
-  getCaseById,
-  getCaseConceptIds,
-  getCaseFindings,
-  getCasePrompts,
-  promptChoices,
-} from "@/domain/cases";
-import { buildImagingViews, buildLabPanels } from "@/domain/labs";
+import { RoundsEncounter } from "@/components/emr/RoundsEncounter";
+import { TeachingPoint } from "@/components/emr/TeachingPoint";
+import { buildHospitalCourse, lastPlanSignedDate } from "@/domain/chart";
+import { getCaseById, getCaseConceptIds, getCasePrompts, promptChoices } from "@/domain/cases";
 import {
   getPatient,
-  hospitalDay,
-  listPatientActions,
+  hospitalDayOn,
+  listActivePanel,
   listPromptResponses,
-  listRevealedFindingIds,
 } from "@/domain/patients";
 import { getAudioPreferences } from "@/domain/profile";
+import { buildRoundsEncounter } from "@/domain/rounds";
+import { serviceNeighbours } from "@/domain/rooms";
 import { getPreferences } from "@/domain/settings";
 import { resolvePatientVisual } from "@/lib/assets";
 import { db } from "@/server/db";
-import { formatShortDate } from "@/lib/date";
+import { formatShortDate, todayIso } from "@/lib/date";
 import * as schema from "@/db/schema";
-import { AssessmentPlan } from "@/components/emr/AssessmentPlan";
 import { DischargeFlow } from "./DischargeFlow";
 
 export const dynamic = "force-dynamic";
 
-const CLASSIFICATION_TONE: Record<string, Tone> = {
-  REQUIRED: "good",
-  APPROPRIATE: "good",
-  OPTIONAL: "neutral",
-  UNNECESSARY: "warn",
-  CONTRAINDICATED: "bad",
-};
-
-const CATEGORY_LABEL: Record<string, string> = {
-  HISTORY: "History",
-  EXAM: "Examination",
-  VITAL: "Vital signs",
-  LAB: "Laboratory (narrative)",
-  IMAGING: "Imaging (narrative)",
-  ECG: "ECG",
-  OTHER: "Other studies",
-};
-
-const STATE_BADGE: Record<string, { label: string; tone: Tone }> = {
-  PENDING_HANDOFF: { label: "Handoff", tone: "info" },
-  PENDING_ADMISSION: { label: "Admission", tone: "warn" },
-  ON_SERVICE: { label: "On service", tone: "neutral" },
-  DISCHARGE_ELIGIBLE: { label: "Discharge ready", tone: "good" },
-  DISCHARGED: { label: "Discharged", tone: "neutral" },
-  ARCHIVED: { label: "Archived", tone: "neutral" },
-};
-
-/** Patient chart. Active patients see only what they have uncovered (spec §56). */
+/**
+ * The patient chart: two tabs, because there are two things a learner does with
+ * a patient — read them, and work them.
+ *
+ * Summary is the record: how they presented, what was handed over, and the
+ * problem-based course as the learner's own signed plans have written it.
+ * Rounds is today's work, and it holds the data the old Results tab used to,
+ * because the point of looking at a potassium is the decision you make with it.
+ */
 export default async function PatientPage({
   params,
   searchParams,
@@ -78,45 +48,36 @@ export default async function PatientPage({
   const { id } = await params;
   const { tab: requestedTab } = await searchParams;
   const database = db();
+  const today = todayIso();
+
   const patient = getPatient(database, id);
   if (!patient) notFound();
 
   const template = getCaseById(database, patient.caseId);
   if (!template) notFound();
 
-  const isDischarged = patient.state === "DISCHARGED" || patient.state === "ARCHIVED";
   const undifferentiated = patient.state === "PENDING_ADMISSION";
+  const isDischarged = patient.state === "DISCHARGED" || patient.state === "ARCHIVED";
   const prefs = getPreferences(database);
 
-  const revealedIds = new Set(listRevealedFindingIds(database, patient.id));
-  const allFindings = getCaseFindings(database, patient.caseId);
-  const taken = listPatientActions(database, patient.id);
-  const takenCodes = new Set(taken.map((a) => a.actionCode));
-
-  // A discharged patient becomes a full case review (spec §25); an active one
-  // shows only what the learner has legitimately encountered.
-  const visibleFindings = isDischarged
-    ? allFindings
-    : allFindings.filter((f) => f.initiallyVisible || revealedIds.has(f.id));
-
-  // Handoff patients arrive with their story told, so their results are known.
-  const unlockedFor = isDischarged || patient.entryMode === "HANDOFF" ? null : takenCodes;
-  const labPanels = buildLabPanels(database, patient.caseId, {
-    takenActionCodes: unlockedFor,
-    patientSex: (template.patientSex as "M" | "F" | null) ?? null,
+  const planSignedOn = lastPlanSignedDate(database, patient.id);
+  const encounter = buildRoundsEncounter(database, patient, template, {
+    today,
+    planSignedOn,
   });
-  const imaging = buildImagingViews(database, patient.caseId, unlockedFor);
-  const chart = buildChart(database, patient.id, patient.caseId);
+  const course = buildHospitalCourse(database, patient.id, patient.caseId);
 
-  const groups = Object.entries(
-    visibleFindings.reduce<Record<string, typeof visibleFindings>>((acc, finding) => {
-      (acc[finding.category] ??= []).push(finding);
-      return acc;
-    }, {}),
+  // The discharge question the case still has outstanding, if any. Discharge
+  // itself stays governed by the case engine: eligibility is the patient's
+  // state, not something the chart decides.
+  const answeredDischarge = new Set(
+    listPromptResponses(database, patient.id)
+      .filter((r) => r.stage === "DISCHARGE")
+      .map((r) => r.promptId),
   );
-
-  const actionDefs = new Map(listActions(database).map((a) => [a.actionCode, a]));
-  const responses = listPromptResponses(database, patient.id);
+  const dischargePrompt = getCasePrompts(database, patient.caseId, "DISCHARGE").find(
+    (p) => !answeredDischarge.has(p.id),
+  );
 
   const conceptIds = getCaseConceptIds(database, patient.caseId);
   const concepts = conceptIds.length
@@ -133,44 +94,32 @@ export default async function PatientPage({
     ).map((s) => [s.conceptId, s]),
   );
 
-  const promptsById = new Map(
-    (["ROUNDS", "DISCHARGE", "ADMISSION", "HANDOFF"] as const)
-      .flatMap((stage) => getCasePrompts(database, patient.caseId, stage))
-      .map((p) => [p.id, p]),
-  );
+  // The header arrows step room to room, skipping beds nobody is in.
+  const neighbours = serviceNeighbours(database, listActivePanel(database), patient.id);
+  const asTarget = (row: (typeof neighbours)["next"]) =>
+    row ? { id: row.id, roomNumber: row.roomNumber, name: row.patientName } : null;
 
-  const dischargePrompts = getCasePrompts(database, patient.caseId, "DISCHARGE");
-  const answeredDischarge = new Set(
-    responses.filter((r) => r.stage === "DISCHARGE").map((r) => r.promptId),
-  );
-  const pendingDischargePrompt = dischargePrompts.find((p) => !answeredDischarge.has(p.id));
-  const correctCount = responses.filter((r) => r.correct).length;
-
-  // Only offer tabs that actually have something behind them (spec §52).
   const available: ChartTab[] = ["summary"];
-  if (labPanels.length > 0 || imaging.length > 0 || groups.length > 0) available.push("results");
-  if (responses.length > 0 || taken.length > 0) available.push("rounds");
-  if (chart.length > 0) available.push("chart");
-
+  if (!undifferentiated && !isDischarged) available.push("rounds");
   const tab = parseChartTab(requestedTab, available);
-
-  const visual = resolvePatientVisual({ patientName: patient.patientName });
 
   return (
     <>
       <AppHeader subtitle="Patient chart" />
 
       <PatientHeader
-        visual={visual}
+        visual={resolvePatientVisual({ patientName: patient.patientName })}
         name={patient.patientName}
         ageYears={template.patientAgeYears}
         sex={template.patientSex}
         roomNumber={patient.roomNumber}
-        hospitalDay={hospitalDay(patient)}
+        hospitalDay={hospitalDayOn(patient, today)}
         diagnosis={undifferentiated ? null : template.primaryDiagnosis}
         allergies={undifferentiated ? undefined : template.allergies}
         codeStatus={undifferentiated ? undefined : template.codeStatus}
-        status={STATE_BADGE[patient.state] ?? null}
+        previous={asTarget(neighbours.previous)}
+        next={asTarget(neighbours.next)}
+        tab={tab}
       />
       <ChartTabs patientId={patient.id} active={tab} available={available} />
 
@@ -180,28 +129,6 @@ export default async function PatientPage({
         </Link>
 
         {/* --- state-specific calls to action ----------------------------- */}
-        {patient.state === "DISCHARGE_ELIGIBLE" ? (
-          <section className="mt-4">
-            <SectionHeading>Discharge</SectionHeading>
-            <DischargeFlow
-              patientId={patient.id}
-              patientName={patient.patientName}
-              prompt={
-                pendingDischargePrompt
-                  ? {
-                      id: pendingDischargePrompt.id,
-                      promptText: pendingDischargePrompt.promptText,
-                      responseType: pendingDischargePrompt.responseType,
-                      choices: promptChoices(pendingDischargePrompt),
-                      allowsFreeText: pendingDischargePrompt.responseType === "SHORT_TEXT",
-                    }
-                  : null
-              }
-              audio={getAudioPreferences(database)}
-            />
-          </section>
-        ) : null}
-
         {undifferentiated ? (
           <Card className="mt-4 border-warn-200 bg-warn-50 p-3">
             <p className="text-sm text-warn-700">
@@ -245,42 +172,36 @@ export default async function PatientPage({
                 <p className="text-sm leading-relaxed text-ink-800">
                   {template.admissionOpening}
                 </p>
+                {template.teachingPoint ? (
+                  <p className="mt-3">
+                    <TeachingPoint text={template.teachingPoint} />
+                  </p>
+                ) : null}
               </Card>
             </section>
 
-            {!undifferentiated && template.handoffScript ? (
+            {!undifferentiated && (template.dailySignout || template.handoffScript) ? (
               <section>
-                <SectionHeading>Sign-out</SectionHeading>
+                <SectionHeading>
+                  Overnight sign-out · Hospital day {hospitalDayOn(patient, today)}
+                </SectionHeading>
                 <Card className="p-4">
                   <p className="text-sm leading-relaxed text-ink-800">
-                    {template.handoffScript}
+                    {template.dailySignout || template.handoffScript}
                   </p>
                 </Card>
               </section>
             ) : null}
 
-            {!undifferentiated && template.teachingPoint ? (
-              <section>
-                <SectionHeading>Teaching point</SectionHeading>
-                <Card className="border-clinical-200 bg-clinical-50 p-4">
-                  <p className="text-sm leading-relaxed text-clinical-700">
-                    {template.teachingPoint}
-                  </p>
-                </Card>
-              </section>
-            ) : null}
+            {!undifferentiated ? <HospitalCourse course={course} /> : null}
 
             {concepts.length > 0 ? (
-              <section>
-                <SectionHeading>Concepts encountered</SectionHeading>
-                <Card className="divide-y divide-ink-100">
+              <Disclosure summary={`Concepts encountered (${concepts.length})`}>
+                <ul className="divide-y divide-ink-100">
                   {concepts.map((concept) => {
                     const state = conceptStates.get(concept.id);
                     return (
-                      <div
-                        key={concept.id}
-                        className="flex justify-between gap-4 px-4 py-2.5"
-                      >
+                      <li key={concept.id} className="flex justify-between gap-4 py-2">
                         <span className="min-w-0 text-sm text-ink-700">
                           <span className="block truncate">{concept.name}</span>
                           <span className="block text-xs text-ink-400">{concept.code}</span>
@@ -293,61 +214,30 @@ export default async function PatientPage({
                             </span>
                           ) : null}
                         </span>
-                      </div>
+                      </li>
                     );
                   })}
-                </Card>
-              </section>
+                </ul>
+              </Disclosure>
             ) : null}
           </div>
         ) : null}
 
-        {/* ------------------------------ results -------------------------- */}
-        {tab === "results" ? (
-          <div className="mt-4 space-y-5">
-            <LabPanels
-              panels={labPanels}
-              showReferenceRanges={prefs.labs.showReferenceRanges}
-            />
-
-            {imaging.length > 0 ? (
-              <section>
-                <SectionHeading>Imaging</SectionHeading>
-                <ImagingList studies={imaging} />
-              </section>
-            ) : null}
-
-            {groups.map(([category, findings]) => (
-              <section key={category}>
-                <SectionHeading>{CATEGORY_LABEL[category] ?? category}</SectionHeading>
-                <Card className="divide-y divide-ink-100">
-                  {findings.map((finding) => (
-                    <div key={finding.id} className="flex justify-between gap-4 px-4 py-2.5">
-                      <span className="text-sm text-ink-600">{finding.label}</span>
-                      <span className="text-right text-sm text-ink-900">
-                        {finding.value}
-                        {finding.units ? ` ${finding.units}` : ""}
-                        {finding.referenceRange && prefs.labs.showReferenceRanges ? (
-                          <span className="ml-2 text-xs text-ink-400">
-                            ({finding.referenceRange})
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  ))}
-                </Card>
-              </section>
-            ))}
-          </div>
-        ) : null}
-
-        {/* ------------------------------- chart --------------------------- */}
-        {tab === "chart" ? (
+        {/* ------------------------------- rounds -------------------------- */}
+        {tab === "rounds" ? (
           <div className="mt-4">
-            <SectionHeading>Assessment &amp; plan</SectionHeading>
-            <AssessmentPlan
+            <RoundsEncounter
               patientId={patient.id}
-              problems={chart.map((problem) => ({
+              patientName={patient.patientName}
+              hospitalDay={encounter.hospitalDay}
+              status={encounter.status}
+              prompt={encounter.prompt}
+              answeredToday={encounter.answeredToday}
+              vitals={encounter.vitals}
+              labPanels={encounter.labPanels}
+              imaging={encounter.imaging}
+              findings={encounter.findings}
+              problems={encounter.problems.map((problem) => ({
                 id: problem.id,
                 label: problem.label,
                 assessmentText: problem.assessmentText,
@@ -359,66 +249,33 @@ export default async function PatientPage({
                   selected: o.selected,
                 })),
               }))}
-              readOnly={isDischarged}
+              priorAnswers={encounter.priorAnswers}
+              dischargeEligible={encounter.dischargeEligible}
+              showReferenceRanges={prefs.labs.showReferenceRanges}
+              audio={getAudioPreferences(database)}
+              discharge={
+                encounter.dischargeEligible ? (
+                  <DischargeFlow
+                    patientId={patient.id}
+                    patientName={patient.patientName}
+                    prompt={
+                      dischargePrompt
+                        ? {
+                            id: dischargePrompt.id,
+                            promptText: dischargePrompt.promptText,
+                            responseType: dischargePrompt.responseType,
+                            choices: promptChoices(dischargePrompt),
+                            allowsFreeText: dischargePrompt.responseType === "SHORT_TEXT",
+                          }
+                        : null
+                    }
+                    audio={getAudioPreferences(database)}
+                  />
+                ) : null
+              }
             />
           </div>
         ) : null}
-
-        {/* ------------------------------- rounds -------------------------- */}
-        {tab === "rounds" ? (
-          <div className="mt-4 space-y-4">
-            {taken.length > 0 ? (
-              <section>
-                <SectionHeading>Orders and actions</SectionHeading>
-                <Card className="divide-y divide-ink-100">
-                  {taken.map((action) => (
-                    <div key={action.id} className="p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-medium text-ink-800">
-                          {actionDefs.get(action.actionCode)?.displayName ?? action.actionCode}
-                        </p>
-                        <Badge tone={CLASSIFICATION_TONE[action.classification] ?? "neutral"}>
-                          {action.classification}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-sm text-ink-600">{action.resultText}</p>
-                    </div>
-                  ))}
-                </Card>
-              </section>
-            ) : null}
-
-            {responses.length > 0 ? (
-              <section>
-                <SectionHeading>
-                  Study performance — {correctCount}/{responses.length} correct
-                </SectionHeading>
-                <Card className="divide-y divide-ink-100">
-                  {responses.map((response) => {
-                    const prompt = promptsById.get(response.promptId);
-                    return (
-                      <div key={response.id} className="p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm text-ink-800">
-                            {prompt?.promptText ?? "Question"}
-                          </p>
-                          <Badge tone={response.correct ? "good" : "warn"}>
-                            {response.correct ? "Correct" : "Missed"}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-ink-400">
-                          {response.stage.toLowerCase()} ·{" "}
-                          {formatShortDate(response.createdAt.slice(0, 10))}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </Card>
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-
       </PageShell>
     </>
   );

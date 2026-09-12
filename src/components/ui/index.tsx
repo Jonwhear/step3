@@ -110,3 +110,33 @@ export function ProgressBar({ percent, label }: { percent: number; label?: strin
     </div>
   );
 }
+
+/**
+ * A collapsed section. Built on `<details>` so keyboard support, screen-reader
+ * semantics and open/close state come from the platform rather than from state
+ * this app would have to keep correct.
+ */
+export function Disclosure({
+  summary,
+  children,
+  className = "",
+}: {
+  summary: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <details className={`group overflow-hidden rounded-xl border border-ink-200 bg-surface ${className}`}>
+      <summary className="tap flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm font-medium text-ink-700">
+        <span
+          aria-hidden="true"
+          className="text-ink-400 transition-transform group-open:rotate-90"
+        >
+          ▸
+        </span>
+        {summary}
+      </summary>
+      <div className="border-t border-ink-100 px-4 py-3">{children}</div>
+    </details>
+  );
+}
