@@ -10,18 +10,19 @@
 import Link from "next/link";
 
 /**
- * Two tabs, because there are two things a learner does with a patient: read
- * them, and work them.
+ * Read the patient, work them, write them up.
  *
  * Results had its own tab once. It is now part of rounds — a potassium is read
  * in order to decide something, and putting the number a tap away from the
- * decision made the learner carry it in their head.
+ * decision made the learner carry it in their head. The note is its own
+ * section because signing it is the end of the patient's day.
  */
-export type ChartTab = "summary" | "rounds";
+export type ChartTab = "summary" | "rounds" | "note";
 
 export const CHART_TAB_LABELS: Record<ChartTab, string> = {
   summary: "Summary",
   rounds: "Rounds",
+  note: "Note",
 };
 
 export function ChartTabs({

@@ -21,13 +21,21 @@ import { and, asc, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import * as t from "@/db/schema";
 import { caseHasRoundsTask, getCaseFindings, getCasePrompts, promptChoices } from "@/domain/cases";
-import { buildChart, type ProblemView } from "@/domain/chart";
+import {
+  buildChart,
+  lastPlanSignedDate,
+  listCaseProblems,
+  syncEmergedProblems,
+  type ProblemView,
+} from "@/domain/chart";
 import { buildImagingViews, buildLabPanels, type ImagingResultView, type LabPanelView } from "@/domain/labs";
 import {
+  advancePatientAfterRounds,
   hasAnsweredPromptOn,
   hospitalDayOn,
   listPatientActions,
   listPromptResponses,
+  recordStudyEvent,
 } from "@/domain/patients";
 import { nowIso, todayIso, type IsoDate } from "@/lib/date";
 
@@ -48,6 +56,77 @@ export function roundsStatusFor(
   if (!onService) return "NO_TASK";
   if (patient.lastRoundsDate === today) return "COMPLETED_TODAY";
   return caseHasRoundsTask(db, patient.caseId) ? "DUE" : "NO_TASK";
+}
+
+/**
+ * What this patient still owes today.
+ *
+ * There are only ever two pieces: the question, and the note. Whichever of them
+ * the case actually has must be done, and when the last one is, the patient's
+ * day is over — there is no separate "I am finished" button to press, because
+ * pressing Submit and then pressing Done says the same thing twice.
+ */
+export interface RoundWork {
+  question: boolean;
+  note: boolean;
+}
+
+export function outstandingWork(
+  db: Db,
+  patient: t.PatientInstanceRow,
+  today: IsoDate = todayIso(),
+): RoundWork {
+  const prompts = getCasePrompts(db, patient.caseId, "ROUNDS");
+  const prompt = prompts.length
+    ? prompts[patient.currentRoundPromptIndex % prompts.length]
+    : undefined;
+
+  const hasProblems = listCaseProblems(db, patient.caseId).length > 0;
+
+  return {
+    question: prompt ? !hasAnsweredPromptOn(db, patient.id, prompt.id, today) : false,
+    note: hasProblems ? lastPlanSignedDate(db, patient.id) !== today : false,
+  };
+}
+
+/**
+ * Ends the patient's day once nothing is outstanding.
+ *
+ * Called after the two things that can finish it — submitting the answer and
+ * signing the note — so the last of them closes the day, whichever it is. A
+ * case with no note finishes on Submit; a case with one finishes on Sign.
+ *
+ * Idempotent for the day, so a double submit cannot spend two rounds of a case
+ * that only has so many questions in it.
+ */
+export function completeRoundIfDone(
+  db: Db,
+  patient: t.PatientInstanceRow,
+  template: t.CaseTemplateRow,
+  today: IsoDate = todayIso(),
+): boolean {
+  if (patient.lastRoundsDate === today) return false;
+  if (roundsStatusFor(db, patient, today) !== "DUE") return false;
+
+  const work = outstandingWork(db, patient, today);
+  if (work.question || work.note) return false;
+
+  // While `hospitalDayOn` still reports the day being closed, not the next one.
+  recordObservations(db, patient, today);
+  advancePatientAfterRounds(
+    db,
+    patient,
+    getCasePrompts(db, patient.caseId, "ROUNDS").length,
+    template.minimumRoundsBeforeDischarge,
+    today,
+  );
+  recordStudyEvent(db, {
+    eventType: "ROUND_COMPLETED",
+    patientInstanceId: patient.id,
+    caseId: patient.caseId,
+    date: today,
+  });
+  return true;
 }
 
 /* ------------------------------ observations ------------------------------ */
@@ -233,6 +312,10 @@ export interface RoundsEncounterData {
   findings: EncounterFinding[];
   problems: ProblemView[];
   planSignedOn: string | null;
+  /** True when the note for today has already been signed. */
+  noteSignedToday: boolean;
+  /** Problems that joined the list on the day being worked. */
+  newProblemIds: string[];
   priorAnswers: PriorAnswer[];
 }
 
@@ -248,6 +331,11 @@ export function buildRoundsEncounter(
 ): RoundsEncounterData {
   const today = options.today ?? todayIso();
   const day = hospitalDayOn(patient, today);
+
+  // A problem that arises during the admission is put on the list with its
+  // diagnosis already written; choosing its management is the learner's work.
+  syncEmergedProblems(db, patient.id, patient.caseId, day);
+
   const history = listObservationHistory(db, patient.id);
 
   const prompts = getCasePrompts(db, patient.caseId, "ROUNDS");
@@ -320,6 +408,9 @@ export function buildRoundsEncounter(
       .map((p) => [p.id, p]),
   );
 
+  const problems = buildChart(db, patient.id, patient.caseId);
+  const signedOn = options.planSignedOn ?? lastPlanSignedDate(db, patient.id);
+
   const priorAnswers: PriorAnswer[] = listPromptResponses(db, patient.id).map((response) => ({
     id: response.id,
     promptText: promptsById.get(response.promptId)?.promptText ?? "Question",
@@ -352,8 +443,12 @@ export function buildRoundsEncounter(
     labPanels,
     imaging: buildImagingViews(db, patient.caseId, unlocked),
     findings,
-    problems: buildChart(db, patient.id, patient.caseId),
-    planSignedOn: options.planSignedOn ?? null,
+    problems,
+    planSignedOn: signedOn,
+    noteSignedToday: signedOn === today,
+    newProblemIds: problems
+      .filter((problem) => problem.added && problem.addedOnDay === day)
+      .map((problem) => problem.id),
     priorAnswers,
   };
 }

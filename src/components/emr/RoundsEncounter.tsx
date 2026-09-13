@@ -4,18 +4,20 @@
  * One patient's rounds for one hospital day (spec V3 §10-17).
  *
  * The order is the order the work happens in: the clinical question first,
- * before any data is interpreted for the learner; then today's state; then the
- * plan; then sign-off. Previous performance is real but historical, so it sits
- * collapsed at the bottom rather than competing with today.
+ * before any data is interpreted for the learner; then today's state.
+ * Previous performance is real but historical, so it sits collapsed at the
+ * bottom rather than competing with today.
  *
- * The same component serves the patient chart and the service walker. The only
- * difference between them is what happens after sign-off, which the caller
- * supplies.
+ * There is no sign-off button here. Answering is the whole gesture when the
+ * case has no note to write, and where it has one, signing that note is what
+ * ends the patient's day — pressing Submit and then pressing Done would be
+ * saying the same thing twice.
+ *
+ * The same component serves the patient chart and the service walker; the
+ * walker passes the note in, so its whole day is one scroll.
  */
 
-import { useState, useTransition } from "react";
-import { signOffRoundsAction } from "@/app/actions";
-import { AssessmentPlan, type ProblemProp } from "@/components/emr/AssessmentPlan";
+import { useState } from "react";
 import { CurrentData } from "@/components/emr/CurrentData";
 import { PromptCard, type PromptView } from "@/components/patient/PromptCard";
 import { Badge, Card, Disclosure, SectionHeading } from "@/components/ui";
@@ -40,16 +42,16 @@ export interface RoundsEncounterProps {
   labPanels: EncounterLabPanel[];
   imaging: ImagingResultView[];
   findings: EncounterFinding[];
-  problems: ProblemProp[];
   priorAnswers: PriorAnswer[];
   dischargeEligible: boolean;
   showReferenceRanges: boolean;
   audio: { rate: number; voiceUri: string | null };
-  /** Rendered under the sign-off button when discharge is on the table. */
+  /** The day's note, when the caller wants it on this screen too. */
+  note?: React.ReactNode;
+  /** Rendered when the case engine has made the patient discharge-eligible. */
   discharge?: React.ReactNode;
-  /** What the caller does once this patient is signed off. */
-  onSignedOff?: () => void;
-  signOffLabel?: string;
+  /** Called when answering finished the patient's day. */
+  onAnswered?: () => void;
 }
 
 export function RoundsEncounter({
@@ -63,33 +65,21 @@ export function RoundsEncounter({
   labPanels,
   imaging,
   findings,
-  problems,
   priorAnswers,
   dischargeEligible,
   showReferenceRanges,
   audio,
+  note,
   discharge,
-  onSignedOff,
-  signOffLabel,
+  onAnswered,
 }: RoundsEncounterProps) {
   // Whether the question was already answered when the learner arrived. Taken
   // once: answering flips the live prop, and swapping the card out at that
   // moment would throw away the explanation they are reading.
   const [askedOnArrival] = useState(() => !answeredToday);
   const [answeredHere, setAnsweredHere] = useState(false);
-  const [signingOff, startSignOff] = useTransition();
 
-  const answered = !askedOnArrival || answeredHere;
   const completed = status === "COMPLETED_TODAY";
-
-  const signOff = () => {
-    const formData = new FormData();
-    formData.set("patientId", patientId);
-    startSignOff(async () => {
-      await signOffRoundsAction(formData);
-      onSignedOff?.();
-    });
-  };
 
   return (
     <div className="space-y-5">
@@ -119,7 +109,10 @@ export function RoundsEncounter({
             prompt={prompt}
             ttsRate={audio.rate}
             voiceUri={audio.voiceUri}
-            onGraded={() => setAnsweredHere(true)}
+            onGraded={() => {
+              setAnsweredHere(true);
+              onAnswered?.();
+            }}
           />
         ) : prompt ? (
           <Card className="p-4">
@@ -137,6 +130,8 @@ export function RoundsEncounter({
         )}
       </section>
 
+      {dischargeEligible && !completed ? <Badge tone="good">Discharge eligible</Badge> : null}
+
       {/* ------------------------------ the data ------------------------------ */}
       <section>
         <SectionHeading>Current data</SectionHeading>
@@ -149,38 +144,15 @@ export function RoundsEncounter({
         />
       </section>
 
-      {/* -------------------------------- plan -------------------------------- */}
-      {problems.length > 0 ? (
+      {/* -------------------------------- note -------------------------------- */}
+      {note ? (
         <section>
-          <SectionHeading>Plan</SectionHeading>
-          <AssessmentPlan patientId={patientId} problems={problems} readOnly={completed} />
+          <SectionHeading>Progress note · Hospital day {hospitalDay}</SectionHeading>
+          {note}
         </section>
       ) : null}
 
-      {/* ------------------------------ sign off ------------------------------ */}
-      {!completed ? (
-        <section className="space-y-2">
-          {dischargeEligible ? (
-            <Badge tone="good">Discharge eligible</Badge>
-          ) : null}
-          <button
-            type="button"
-            onClick={signOff}
-            disabled={signingOff || status === "NO_TASK" || (prompt !== null && !answered)}
-            className="h-12 w-full rounded-lg bg-ink-900 text-sm font-semibold text-surface disabled:opacity-50"
-          >
-            {signingOff ? "Signing off…" : (signOffLabel ?? "Sign off rounds")}
-          </button>
-          {!answered && prompt ? (
-            <p className="text-center text-xs text-ink-400">
-              Answer today&apos;s question before signing off.
-            </p>
-          ) : null}
-          {discharge}
-        </section>
-      ) : (
-        discharge ?? null
-      )}
+      {discharge ? <section>{discharge}</section> : null}
 
       {/* -------------------------- previous performance ---------------------- */}
       {priorAnswers.length > 0 ? (

@@ -64,7 +64,7 @@ Implemented:
 | Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (249) | ✅ |
+| Automated tests (254) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -180,8 +180,9 @@ conference. Normal pacing starts the following day.
 | Screen | Path |
 |---|---|
 | Service — the ward *is* the patient list | `/` |
-| Patient chart (Summary · Rounds) | `/patients/<id>` |
-| Today's work: question, data, plan, sign-off | `/patients/<id>?tab=rounds` |
+| Patient chart (Summary · Rounds · Note) | `/patients/<id>` |
+| Today's question and today's data | `/patients/<id>?tab=rounds` |
+| The day's progress note; signing it ends the day | `/patients/<id>?tab=note` |
 | ED board — admit a diagnosis you choose | `/admissions` |
 | Content library and case editor | `/settings/content` |
 | Content coverage audit | `/settings/content/coverage` |
@@ -232,6 +233,9 @@ application, and they are not reproducible.
 - `0002_patient_observations` adds one table and nothing else, for the same
   reason: a value the learner saw on an earlier hospital day has to be stored
   to be shown again.
+- `0003_problem_lifecycle` adds two columns to `patient_problem` — the day a
+  problem joined the list and the day it was resolved — so a problem can arise
+  mid-admission and later resolve without being deleted.
 - `tests/migrations.test.ts` builds a database at the V1 schema, fills it with
   real user data, runs the migration chain and asserts both the row counts and
   the individual field values survive. Keep that test passing.
@@ -623,9 +627,10 @@ One patient, one page, in the order a real encounter happens:
 ```
 TODAY'S ROUNDS      the clinical question, before any data is interpreted
 CURRENT DATA        vitals, labs, imaging, history and exam as they stand today
-PLAN                the problem list and what goes under each problem
-SIGN OFF ROUNDS     the end of the day for this patient
 ▸ Previous performance
+
+NOTE (its own tab)  the problem list, and the management under each
+                    signing it ends the patient's day
 ```
 
 `components/emr/RoundsEncounter` renders that for both the patient chart's
@@ -643,12 +648,27 @@ because the label would be on every row.
 that authors neither a question nor a problem list has nothing to ask, so the
 patient is not reported as overdue and the workload count does not include them.
 
-**The round closes on sign-off.** `signOffRoundsAction` records today's
+**There is no sign-off button.** Pressing Submit and then pressing Done says
+the same thing twice. `outstandingWork` names the only two pieces a day can
+have — the question and the note — and `completeRoundIfDone` runs after each of
+them, so whichever is last closes the day: a case with no problem list finishes
+on Submit, a case with one finishes on Sign. Closing the day records the
 observations, finalises the plan into the hospital course, counts the round and
-takes the patient off today's workload — then the chart reads "Rounds complete
-for hospital day N" and stays that way however often it is reopened. It is
-idempotent for the day, and answering the same question twice on one day is
-refused, so one piece of knowledge cannot move mastery twice.
+clears the workload; the chart then reads "Note signed — rounds complete for
+hospital day N" however often it is reopened. It is idempotent for the day, and
+answering the same question twice on one day is refused, so one piece of
+knowledge cannot move mastery twice.
+
+**Problems arrive with their diagnosis written.** The admitting problem is on
+the list from day one; each remaining expected problem joins on a later day
+(`emergenceSchedule`), badged "New today" with its management unchosen. The
+learner's work on a new problem is deciding what to do about it, which is the
+part worth practising. Every problem, assessment and plan option is authored
+content — the schedule only decides which day each surfaces, and a case that
+wants explicit control over that is the natural next step.
+
+Resolving a problem takes it off the active note and into the course; the row
+survives, which is also what stops the emergence rule putting it straight back.
 
 **Discharge is the same workflow, not another one.** When the case engine has
 made the patient discharge-eligible, the discharge step appears inside the
@@ -692,8 +712,8 @@ exercises the real decision — which problems exist and what belongs under each
 - **Grading happens on Sign, not on each tick**, so a half-built plan carries
   no penalty and can be revised freely.
 - `renderPlanAsNote` produces the note-like text shown back to the learner.
-- One editor (`components/emr/AssessmentPlan`) serves every surface that edits a
-  plan, so there are not two that can drift.
+- One editor (`components/emr/DailyNote`) serves every surface that writes a
+  note, so there are not two that can drift.
 
 ### The hospital course
 
@@ -952,7 +972,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-249 tests across 18 files. Every test runs against a real in-memory SQLite
+254 tests across 18 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -972,7 +992,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (184 tests):**
+**V2 suites (189 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped
@@ -1026,6 +1046,12 @@ mocks of the domain layer.
   moves a delisted problem to resolved; the header arrows step to the next and
   previous occupied rooms and do not wrap; and the chart offers no Results tab,
   collapses concepts and hides the teaching point.
+  Also: the admitting problem is on the list from day one and later expected
+  problems arrive a day at a time with their management unchosen; a resolved
+  problem is never put back on the list and keeps its place in the course; a
+  case with no note finishes its day on the answer alone, while a case with one
+  stays open until the note is signed, and signing twice does not spend a second
+  round.
 - `tests/serviceLabel.test.ts` — the top bar names the rotation as a phrase:
   an off-service day reads "General Service", not "General / Off-Service
   Service", and a rotation already named "… Service" is not given a second one.

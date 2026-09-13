@@ -7,6 +7,7 @@ import { Card, Disclosure, SectionHeading } from "@/components/ui";
 import { ChartTabs, parseChartTab, type ChartTab } from "@/components/emr/ChartTabs";
 import { HospitalCourse } from "@/components/emr/HospitalCourse";
 import { PatientHeader } from "@/components/emr/PatientHeader";
+import { DailyNote } from "@/components/emr/DailyNote";
 import { RoundsEncounter } from "@/components/emr/RoundsEncounter";
 import { TeachingPoint } from "@/components/emr/TeachingPoint";
 import { buildHospitalCourse, lastPlanSignedDate } from "@/domain/chart";
@@ -100,8 +101,26 @@ export default async function PatientPage({
     row ? { id: row.id, roomNumber: row.roomNumber, name: row.patientName } : null;
 
   const available: ChartTab[] = ["summary"];
-  if (!undifferentiated && !isDischarged) available.push("rounds");
+  if (!undifferentiated && !isDischarged) {
+    available.push("rounds");
+    if (encounter.problems.length > 0) available.push("note");
+  }
   const tab = parseChartTab(requestedTab, available);
+
+  const noteProblems = encounter.problems.map((problem) => ({
+    id: problem.id,
+    label: problem.label,
+    assessmentText: problem.assessmentText,
+    isPrimary: problem.isPrimary,
+    added: problem.added,
+    addedOnDay: problem.addedOnDay,
+    resolvedOnDay: problem.resolvedOnDay,
+    options: problem.options.map((o) => ({
+      id: o.id,
+      label: o.label,
+      selected: o.selected,
+    })),
+  }));
 
   return (
     <>
@@ -237,45 +256,63 @@ export default async function PatientPage({
               labPanels={encounter.labPanels}
               imaging={encounter.imaging}
               findings={encounter.findings}
-              problems={encounter.problems.map((problem) => ({
-                id: problem.id,
-                label: problem.label,
-                assessmentText: problem.assessmentText,
-                isPrimary: problem.isPrimary,
-                added: problem.added,
-                options: problem.options.map((o) => ({
-                  id: o.id,
-                  label: o.label,
-                  selected: o.selected,
-                })),
-              }))}
               priorAnswers={encounter.priorAnswers}
               dischargeEligible={encounter.dischargeEligible}
               showReferenceRanges={prefs.labs.showReferenceRanges}
               audio={getAudioPreferences(database)}
-              discharge={
-                encounter.dischargeEligible ? (
-                  <DischargeFlow
-                    patientId={patient.id}
-                    patientName={patient.patientName}
-                    prompt={
-                      dischargePrompt
-                        ? {
-                            id: dischargePrompt.id,
-                            promptText: dischargePrompt.promptText,
-                            responseType: dischargePrompt.responseType,
-                            choices: promptChoices(dischargePrompt),
-                            allowsFreeText: dischargePrompt.responseType === "SHORT_TEXT",
-                          }
-                        : null
-                    }
-                    audio={getAudioPreferences(database)}
-                  />
-                ) : null
-              }
             />
+            {encounter.problems.length > 0 && encounter.status === "DUE" ? (
+              <Card className="mt-5 p-4">
+                <p className="text-sm text-ink-600">
+                  {encounter.noteSignedToday
+                    ? "Today's note is signed."
+                    : "Write and sign today's note to finish with this patient."}
+                </p>
+                <Link
+                  href={`/patients/${patient.id}?tab=note`}
+                  className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
+                >
+                  Open the note ›
+                </Link>
+              </Card>
+            ) : null}
           </div>
         ) : null}
+
+        {/* -------------------------------- note --------------------------- */}
+        {tab === "note" ? (
+          <div className="mt-4 space-y-4">
+            <SectionHeading>
+              Progress note · Hospital day {encounter.hospitalDay}
+            </SectionHeading>
+            <DailyNote
+              patientId={patient.id}
+              patientName={patient.patientName}
+              hospitalDay={encounter.hospitalDay}
+              problems={noteProblems}
+              signedToday={encounter.noteSignedToday}
+            />
+            {encounter.dischargeEligible ? (
+              <DischargeFlow
+                patientId={patient.id}
+                patientName={patient.patientName}
+                prompt={
+                  dischargePrompt
+                    ? {
+                        id: dischargePrompt.id,
+                        promptText: dischargePrompt.promptText,
+                        responseType: dischargePrompt.responseType,
+                        choices: promptChoices(dischargePrompt),
+                        allowsFreeText: dischargePrompt.responseType === "SHORT_TEXT",
+                      }
+                    : null
+                }
+                audio={getAudioPreferences(database)}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
       </PageShell>
     </>
   );

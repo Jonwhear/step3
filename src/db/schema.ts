@@ -319,13 +319,24 @@ export const patientPlanSelection = sqliteTable(
   (t) => [primaryKey({ columns: [t.patientInstanceId, t.optionId] })],
 );
 
-/** Problems the learner has added to this patient's problem list. */
+/**
+ * Problems on this patient's list.
+ *
+ * A row exists from the moment a problem is on the list, and it stays there
+ * once resolved rather than being deleted: a problem that was real yesterday is
+ * part of the hospital course, and the row is also what stops a resolved
+ * problem from being put straight back on the list by the emergence rule.
+ */
 export const patientProblem = sqliteTable(
   "patient_problem",
   {
     patientInstanceId: text("patient_instance_id").notNull(),
     problemId: text("problem_id").notNull(),
     addedAt: text("added_at").notNull().default(now),
+    /** The hospital day it went on the list; 1 for the admitting problems. */
+    addedOnDay: integer("added_on_day").notNull().default(1),
+    /** Null while active. Set to the hospital day it was resolved on. */
+    resolvedOnDay: integer("resolved_on_day"),
   },
   (t) => [primaryKey({ columns: [t.patientInstanceId, t.problemId] })],
 );
@@ -855,3 +866,4 @@ export type LearningPointMappingRow = typeof learningPointMapping.$inferSelect;
 export type EvidenceLinkRow = typeof evidenceLink.$inferSelect;
 export type CaseRevisionRow = typeof caseRevision.$inferSelect;
 export type PatientObservationRow = typeof patientObservation.$inferSelect;
+export type PatientProblemRow = typeof patientProblem.$inferSelect;

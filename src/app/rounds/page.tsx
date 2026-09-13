@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PageShell } from "@/components/layout/PageShell";
 import { getCaseById } from "@/domain/cases";
-import { getPatient } from "@/domain/patients";
-import { initialsFor } from "@/domain/rooms";
-import { buildRoundsEncounter } from "@/domain/rounds";
+import { listActivePanel } from "@/domain/patients";
+import { initialsFor, sortByRoomOrder } from "@/domain/rooms";
+import { buildRoundsEncounter, roundsStatusFor } from "@/domain/rounds";
 import { getPreferences } from "@/domain/settings";
 import { loadDailySession } from "@/server/session";
 import { db } from "@/server/db";
@@ -19,10 +19,16 @@ export default function RoundsPage() {
   const database = db();
   const prefs = getPreferences(database);
 
-  const stops: RoundsStop[] = session.roundsDue
-    .map((panelPatient) => {
-      const patient = getPatient(database, panelPatient.id);
-      if (!patient) return null;
+  // Everyone on service today, finished or not. Keeping the finished ones on
+  // the list is what stops a patient disappearing the moment their note is
+  // signed, taking the grading the learner just asked for with them.
+  const onService = sortByRoomOrder(database, listActivePanel(database)).filter((patient) => {
+    const status = roundsStatusFor(database, patient, session.today);
+    return status === "DUE" || status === "COMPLETED_TODAY";
+  });
+
+  const stops: RoundsStop[] = onService
+    .map((patient) => {
       const template = getCaseById(database, patient.caseId);
       if (!template) return null;
 
@@ -52,12 +58,15 @@ export default function RoundsPage() {
         imaging: encounter.imaging,
         findings: encounter.findings,
         priorAnswers: encounter.priorAnswers,
+        noteSignedToday: encounter.noteSignedToday,
         problems: encounter.problems.map((problem) => ({
           id: problem.id,
           label: problem.label,
           assessmentText: problem.assessmentText,
           isPrimary: problem.isPrimary,
           added: problem.added,
+          addedOnDay: problem.addedOnDay,
+          resolvedOnDay: problem.resolvedOnDay,
           options: problem.options.map((o) => ({
             id: o.id,
             label: o.label,

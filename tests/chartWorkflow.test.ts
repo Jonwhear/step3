@@ -11,7 +11,17 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { caseHasRoundsTask, getCaseById, getCasePrompts } from "@/domain/cases";
-import { buildHospitalCourse, planSnapshot, buildChart, addProblem, togglePlanSelection } from "@/domain/chart";
+import {
+  addProblem,
+  buildChart,
+  buildHospitalCourse,
+  emergenceSchedule,
+  listCaseProblems,
+  planSnapshot,
+  resolveProblem,
+  syncEmergedProblems,
+  togglePlanSelection,
+} from "@/domain/chart";
 import {
   acceptHandoffPatient,
   advancePatientAfterRounds,
@@ -26,8 +36,10 @@ import {
 import { serviceNeighbours } from "@/domain/rooms";
 import {
   buildRoundsEncounter,
+  completeRoundIfDone,
   listObservationHistory,
   observationKeyForVital,
+  outstandingWork,
   priorValuesFor,
   recordObservations,
   roundsStatusFor,
@@ -52,6 +64,18 @@ function acceptFirstPatient() {
   const patient = getPatient(ctx.db, pending.id);
   if (!patient) throw new Error("fixture: patient vanished");
   return patient;
+}
+
+/**
+ * Records an answer stamped on a chosen day. The production path stamps the
+ * real clock, which these fixtures' study dates deliberately are not.
+ */
+function answerOn(patientId: string, promptId: string, day: string) {
+  ctx.handle.sqlite
+    .prepare(
+      "INSERT INTO patient_prompt_response (id, patient_instance_id, prompt_id, stage, response, correct, created_at) VALUES (?,?,?,?,?,?,?)",
+    )
+    .run(`ppr_${promptId}_${day}`, patientId, promptId, "ROUNDS", "A", 1, `${day}T09:00:00.000Z`);
 }
 
 function signOff(patientId: string, today: string) {
@@ -298,9 +322,7 @@ describe("the hospital course", () => {
       date: DAY_1,
     });
 
-    ctx.handle.sqlite
-      .prepare("DELETE FROM patient_problem WHERE patient_instance_id = ? AND problem_id = ?")
-      .run(patient.id, problem.id);
+    resolveProblem(ctx.db, patient.id, problem.id, 2);
 
     const course = buildHospitalCourse(ctx.db, patient.id, withProblems.case_id);
     expect(course.active).toEqual([]);
@@ -349,5 +371,135 @@ describe("what the chart offers", () => {
     // The teaching point is an affordance, not a rendered paragraph.
     expect(page).toContain("<TeachingPoint text={template.teachingPoint} />");
     expect(page).not.toMatch(/\{template\.teachingPoint\}\s*<\/p>/);
+  });
+});
+
+describe("problems that arise during the admission", () => {
+  /** A case that actually defines a problem list, and a patient on it. */
+  function patientWithProblems() {
+    const patient = acceptFirstPatient();
+    const row = ctx.handle.sqlite
+      .prepare("SELECT case_id FROM case_problem GROUP BY case_id HAVING count(*) > 1 LIMIT 1")
+      .get() as { case_id: string } | undefined;
+    if (!row) throw new Error("fixture: no case defines more than one problem");
+    ctx.db
+      .update(schema.patientInstance)
+      .set({ caseId: row.case_id })
+      .where(eq(schema.patientInstance.id, patient.id))
+      .run();
+    const moved = getPatient(ctx.db, patient.id);
+    if (!moved) throw new Error("patient vanished");
+    return { patient: moved, caseId: row.case_id };
+  }
+
+  it("admits on the primary problem and brings the rest a day at a time", () => {
+    const { caseId } = patientWithProblems();
+    const problems = listCaseProblems(ctx.db, caseId);
+    const schedule = emergenceSchedule(problems);
+
+    const days = problems.filter((p) => p.isExpected).map((p) => schedule.get(p.id));
+    expect(days).toContain(1);
+    // Every expected problem is scheduled, and no two share a later day.
+    const later = days.filter((d): d is number => d !== undefined && d > 1);
+    expect(new Set(later).size).toBe(later.length);
+  });
+
+  it("puts a new problem on the list with its diagnosis and no management", () => {
+    const { patient, caseId } = patientWithProblems();
+
+    syncEmergedProblems(ctx.db, patient.id, caseId, 1);
+    const dayOne = buildChart(ctx.db, patient.id, caseId).filter((p) => p.added);
+    expect(dayOne.length).toBeGreaterThan(0);
+
+    syncEmergedProblems(ctx.db, patient.id, caseId, 2);
+    const dayTwo = buildChart(ctx.db, patient.id, caseId).filter((p) => p.added);
+    expect(dayTwo.length).toBeGreaterThan(dayOne.length);
+
+    const arrived = dayTwo.find((p) => p.addedOnDay === 2);
+    expect(arrived).toBeDefined();
+    // The diagnosis is given; the management is the learner's to choose.
+    expect(arrived?.label).toBeTruthy();
+    expect(arrived?.options.some((o) => o.selected)).toBe(false);
+  });
+
+  it("never puts a resolved problem back on the list", () => {
+    const { patient, caseId } = patientWithProblems();
+    syncEmergedProblems(ctx.db, patient.id, caseId, 1);
+    const first = buildChart(ctx.db, patient.id, caseId).find((p) => p.added);
+    if (!first) throw new Error("fixture: nothing emerged on day 1");
+
+    resolveProblem(ctx.db, patient.id, first.id, 2);
+    syncEmergedProblems(ctx.db, patient.id, caseId, 3);
+
+    const after = buildChart(ctx.db, patient.id, caseId).find((p) => p.id === first.id);
+    expect(after?.added).toBe(false);
+    expect(after?.resolvedOnDay).toBe(2);
+    // …and it keeps its place in the record rather than disappearing.
+    expect(
+      buildHospitalCourse(ctx.db, patient.id, caseId).resolved.map((p) => p.problemId),
+    ).toContain(first.id);
+  });
+});
+
+describe("what ends the patient's day", () => {
+  it("is the answer alone when the case has no note to write", () => {
+    const patient = acceptFirstPatient();
+    const template = getCaseById(ctx.db, patient.caseId);
+    if (!template) throw new Error("case vanished");
+    ctx.handle.sqlite.prepare("DELETE FROM case_problem WHERE case_id = ?").run(patient.caseId);
+
+    const prompt = getCasePrompts(ctx.db, patient.caseId, "ROUNDS")[0];
+    if (!prompt) throw new Error("fixture: no rounds prompt");
+
+    expect(outstandingWork(ctx.db, patient, DAY_2)).toEqual({ question: true, note: false });
+    expect(completeRoundIfDone(ctx.db, patient, template, DAY_2)).toBe(false);
+
+    answerOn(patient.id, prompt.id, DAY_2);
+    expect(outstandingWork(ctx.db, patient, DAY_2)).toEqual({ question: false, note: false });
+    expect(completeRoundIfDone(ctx.db, patient, template, DAY_2)).toBe(true);
+    expect(roundsStatusFor(ctx.db, getPatient(ctx.db, patient.id)!, DAY_2)).toBe(
+      "COMPLETED_TODAY",
+    );
+  });
+
+  it("waits for the note when the case has one, then ends on signing", () => {
+    const patient = acceptFirstPatient();
+    const withProblems = ctx.handle.sqlite
+      .prepare("SELECT case_id FROM case_problem LIMIT 1")
+      .get() as { case_id: string } | undefined;
+    if (!withProblems) throw new Error("fixture: no case defines problems");
+    ctx.db
+      .update(schema.patientInstance)
+      .set({ caseId: withProblems.case_id })
+      .where(eq(schema.patientInstance.id, patient.id))
+      .run();
+    const moved = getPatient(ctx.db, patient.id);
+    if (!moved) throw new Error("patient vanished");
+    const template = getCaseById(ctx.db, moved.caseId);
+    if (!template) throw new Error("case vanished");
+
+    const prompt = getCasePrompts(ctx.db, moved.caseId, "ROUNDS")[0];
+    if (!prompt) throw new Error("fixture: no rounds prompt");
+    answerOn(moved.id, prompt.id, DAY_2);
+
+    // Answered, but the note is still owed, so the day stays open.
+    expect(outstandingWork(ctx.db, moved, DAY_2)).toEqual({ question: false, note: true });
+    expect(completeRoundIfDone(ctx.db, moved, template, DAY_2)).toBe(false);
+
+    recordStudyEvent(ctx.db, {
+      eventType: "PLAN_SIGNED",
+      patientInstanceId: moved.id,
+      caseId: moved.caseId,
+      metadata: { hospitalDay: 2, problems: [] },
+      date: DAY_2,
+    });
+    expect(outstandingWork(ctx.db, moved, DAY_2)).toEqual({ question: false, note: false });
+    expect(completeRoundIfDone(ctx.db, moved, template, DAY_2)).toBe(true);
+
+    // Idempotent: a second signing does not spend another round.
+    const after = getPatient(ctx.db, moved.id);
+    if (!after) throw new Error("patient vanished");
+    expect(completeRoundIfDone(ctx.db, after, template, DAY_2)).toBe(false);
+    expect(after.roundsCompleted).toBe(1);
   });
 });

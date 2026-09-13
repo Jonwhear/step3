@@ -1,31 +1,36 @@
 "use client";
 
 /**
- * The service walker: the same encounter as the patient chart, once per
- * patient, in room order.
+ * The service walker: today's list, one patient at a time, in room order.
  *
- * The only thing this adds to `RoundsEncounter` is the walk — where you are in
- * the list, and moving to the next room when a patient is signed off. Keeping
- * the encounter itself in one component is what stops the chart and the walker
- * from becoming two subtly different ways to round.
+ * The list holds everyone on service today — those still owed work and those
+ * already finished — so a patient does not vanish out from under the learner
+ * the moment they sign the note, and the grading they just asked for stays on
+ * screen until they choose to move on.
+ *
+ * The encounter itself is the same component the chart uses. All this adds is
+ * the walk.
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge, EmptyState } from "@/components/ui";
 import { Avatar } from "@/components/patient/Avatar";
+import { DailyNote, type ProblemProp } from "@/components/emr/DailyNote";
 import { RoundsEncounter } from "@/components/emr/RoundsEncounter";
 import type { RoundsEncounterProps } from "@/components/emr/RoundsEncounter";
 import { resolvePatientVisual } from "@/lib/assets";
 
-export interface RoundsStop extends Omit<RoundsEncounterProps, "audio" | "showReferenceRanges"> {
+export interface RoundsStop
+  extends Omit<RoundsEncounterProps, "audio" | "showReferenceRanges" | "note"> {
   initials: string;
   roomNumber: string;
   age: string;
   diagnosis: string;
   roundsCompleted: number;
   minimumRounds: number;
+  problems: ProblemProp[];
+  noteSignedToday: boolean;
 }
 
 export function RoundsRunner({
@@ -37,49 +42,38 @@ export function RoundsRunner({
   audio: { rate: number; voiceUri: string | null };
   showReferenceRanges: boolean;
 }) {
-  const router = useRouter();
-  const [index, setIndex] = useState(0);
-
-  // The walking order is fixed on mount, but each stop is read from live props:
-  // ticking a plan item revalidates the page, and the learner must see their
-  // own tick. Signing off removes the patient from props, which is why the
-  // order is remembered separately.
-  const [order] = useState(() => stops.map((stop) => stop.patientId));
-  const byId = new Map(stops.map((stop) => [stop.patientId, stop]));
+  // Start on the first patient who is actually owed work, so re-entering the
+  // screen later in the day does not walk back through finished patients.
+  const [index, setIndex] = useState(() => {
+    const firstDue = stops.findIndex((stop) => stop.status === "DUE");
+    return firstDue === -1 ? 0 : firstDue;
+  });
 
   if (stops.length === 0) {
     return (
       <EmptyState
-        title="Rounds complete"
-        body="Every patient on your service has been seen today. New questions become available tomorrow."
+        title="Nothing to round on"
+        body="No patient on your service has work outstanding today."
       />
     );
   }
 
-  // Skip past anyone signed off elsewhere — a second tab, a refresh mid-save.
-  const cursor = order.findIndex((id, i) => i >= index && byId.has(id));
-  const stop = cursor === -1 ? undefined : byId.get(order[cursor] as string);
+  const stop = stops[Math.min(index, stops.length - 1)];
   if (!stop) return null;
 
-  const isLast = !order.slice(cursor + 1).some((id) => byId.has(id));
-
-  const advance = () => {
-    if (isLast) {
-      router.push("/");
-      router.refresh();
-    } else {
-      setIndex(cursor + 1);
-    }
-  };
+  const isLast = index >= stops.length - 1;
+  const done = stop.status === "COMPLETED_TODAY";
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <span className="text-xs tabular-nums text-ink-500">
-          Patient {cursor + 1} of {order.length}
+          Patient {index + 1} of {stops.length}
         </span>
-        <Badge tone="neutral">
-          Round {stop.roundsCompleted + 1} of at least {stop.minimumRounds}
+        <Badge tone={done ? "good" : "neutral"}>
+          {done
+            ? "Finished today"
+            : `Round ${stop.roundsCompleted + 1} of at least ${stop.minimumRounds}`}
         </Badge>
       </div>
 
@@ -115,13 +109,40 @@ export function RoundsRunner({
         {...stop}
         audio={audio}
         showReferenceRanges={showReferenceRanges}
-        onSignedOff={advance}
-        signOffLabel={
-          isLast
-            ? `Sign off ${stop.patientName} and end rounds`
-            : `Sign off ${stop.patientName} ›`
+        note={
+          stop.problems.length > 0 ? (
+            <DailyNote
+              patientId={stop.patientId}
+              patientName={stop.patientName}
+              hospitalDay={stop.hospitalDay}
+              problems={stop.problems}
+              signedToday={stop.noteSignedToday}
+            />
+          ) : null
         }
       />
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setIndex((i) => Math.max(0, i - 1))}
+          disabled={index === 0}
+          className="tap h-11 flex-1 rounded-lg border border-ink-200 text-sm font-medium text-ink-700 disabled:opacity-40"
+        >
+          ‹ Previous patient
+        </button>
+        <Link
+          href={isLast ? "/" : "#"}
+          onClick={(event) => {
+            if (isLast) return;
+            event.preventDefault();
+            setIndex((i) => Math.min(stops.length - 1, i + 1));
+          }}
+          className="tap flex h-11 flex-1 items-center justify-center rounded-lg border border-ink-200 text-sm font-medium text-ink-700"
+        >
+          {isLast ? "Back to service" : "Next patient ›"}
+        </Link>
+      </div>
     </div>
   );
 }

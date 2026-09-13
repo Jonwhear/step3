@@ -27,13 +27,13 @@ import {
   addProblem,
   buildChart,
   planSnapshot,
-  removeProblem,
+  resolveProblem,
   renderPlanAsNote,
   scorePlan,
   togglePlanSelection,
 } from "@/domain/chart";
 import { describeEvidence } from "@/domain/content/provenance";
-import { recordObservations } from "@/domain/rounds";
+import { completeRoundIfDone } from "@/domain/rounds";
 import { completeLecture, getLectureConceptIds, startLecture } from "@/domain/lectures";
 import { introduceConcepts, updateConceptMastery } from "@/domain/mastery";
 import {
@@ -353,10 +353,16 @@ export async function submitPromptAction(
     }`;
   }
 
-  // The round itself is closed by signOffRoundsAction, not by answering: the
-  // question is one part of the encounter, and the learner may still want to
-  // read results or revise the plan before signing off on the patient.
   touchPatient(database, patient, today);
+
+  // Submitting is the whole gesture for a case that has no note to sign: there
+  // is no second "done for today" button to press afterwards. Where the case
+  // does have a note, this leaves the day open until that note is signed.
+  if (prompt.stage === "ROUNDS") {
+    const template = getCaseById(database, patient.caseId);
+    const refreshed = getPatient(database, patient.id);
+    if (template && refreshed) completeRoundIfDone(database, refreshed, template, today);
+  }
 
   // Deliberately no revalidate here: the grading is already persisted, and
   // refreshing now would remount this prompt and discard the feedback the
@@ -542,11 +548,21 @@ export async function addProblemAction(formData: FormData): Promise<void> {
   revalidateAll();
 }
 
-export async function removeProblemAction(formData: FormData): Promise<void> {
+/**
+ * Resolves a problem: off the active note, still in the hospital course.
+ *
+ * Problems are not deleted. One that was real yesterday is part of the record,
+ * and the row is also what stops it being put straight back on the list by the
+ * emergence rule.
+ */
+export async function resolveProblemAction(formData: FormData): Promise<void> {
   const patientId = String(formData.get("patientId") ?? "");
   const problemId = String(formData.get("problemId") ?? "");
   if (!patientId || !problemId) return;
-  removeProblem(db(), patientId, problemId);
+  const database = db();
+  const patient = getPatient(database, patientId);
+  if (!patient) return;
+  resolveProblem(database, patientId, problemId, hospitalDayOn(patient, todayIso()));
   revalidateAll();
 }
 
@@ -608,6 +624,14 @@ export async function signPlanAction(
     date: today,
   });
   touchPatient(database, patient, today);
+
+  // Signing the note *is* signing off the patient for the day. If the question
+  // is already answered, this closes the day; if it is not, the day stays open
+  // until it is.
+  const refreshed = getPatient(database, patient.id);
+  const template = getCaseById(database, patient.caseId);
+  if (refreshed && template) completeRoundIfDone(database, refreshed, template, today);
+
   revalidateAll();
 
   return {
@@ -629,66 +653,6 @@ export async function signPlanAction(
     missedProblems: score.missedProblems,
     note: renderPlanAsNote(chart),
   };
-}
-
-/**
- * Signs off rounds on one patient for the current hospital day.
- *
- * This is the end of the encounter, and it does four things in one gesture:
- * records today's vitals and labs so tomorrow has a prior value to show,
- * finalises the plan into the hospital course, counts the round, and takes the
- * patient off today's workload.
- *
- * Idempotent for the day. A learner who reaches this twice — a double tap, a
- * reopened chart — does not get two rounds counted against a case that only
- * has so many questions in it, and today's recorded values are not rewritten.
- */
-export async function signOffRoundsAction(formData: FormData): Promise<void> {
-  const patientId = String(formData.get("patientId") ?? "");
-  const database = db();
-  const patient = getPatient(database, patientId);
-  if (!patient) return;
-
-  const today = todayIso();
-  if (patient.lastRoundsDate === today) return;
-
-  const template = getCaseById(database, patient.caseId);
-  if (!template) return;
-
-  // Before the round is counted, while `hospitalDayOn` still reports the day
-  // being signed off rather than the next one.
-  recordObservations(database, patient, today);
-
-  const chart = buildChart(database, patient.id, patient.caseId);
-  const finalisedPlan = planSnapshot(chart);
-  if (finalisedPlan.length > 0) {
-    recordStudyEvent(database, {
-      eventType: "PLAN_SIGNED",
-      patientInstanceId: patient.id,
-      caseId: patient.caseId,
-      metadata: {
-        hospitalDay: hospitalDayOn(patient, today),
-        problems: finalisedPlan,
-        finalisedAtSignOff: true,
-      },
-      date: today,
-    });
-  }
-
-  advancePatientAfterRounds(
-    database,
-    patient,
-    getCasePrompts(database, patient.caseId, "ROUNDS").length,
-    template.minimumRoundsBeforeDischarge,
-    today,
-  );
-  recordStudyEvent(database, {
-    eventType: "ROUND_COMPLETED",
-    patientInstanceId: patient.id,
-    caseId: patient.caseId,
-    date: today,
-  });
-  revalidateAll();
 }
 
 /* -------------------------------- discharge ------------------------------- */

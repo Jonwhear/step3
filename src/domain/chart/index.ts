@@ -32,8 +32,12 @@ export interface ProblemView {
   assessmentText: string;
   isPrimary: boolean;
   isExpected: boolean;
-  /** True once the learner has added it to this patient's problem list. */
+  /** True while it is on this patient's active problem list. */
   added: boolean;
+  /** The hospital day it joined the list, or null if it never has. */
+  addedOnDay: number | null;
+  /** The hospital day it was resolved on, or null while it is active. */
+  resolvedOnDay: number | null;
   options: PlanOptionView[];
 }
 
@@ -55,15 +59,107 @@ export function listProblemOptions(db: Db, problemId: string): t.CaseProblemOpti
     .all();
 }
 
+export function listPatientProblems(db: Db, patientId: string): t.PatientProblemRow[] {
+  return db
+    .select()
+    .from(t.patientProblem)
+    .where(eq(t.patientProblem.patientInstanceId, patientId))
+    .all();
+}
+
+/** Problems currently on the list. A resolved problem is not one of them. */
 export function listAddedProblemIds(db: Db, patientId: string): Set<string> {
   return new Set(
-    db
-      .select({ problemId: t.patientProblem.problemId })
-      .from(t.patientProblem)
-      .where(eq(t.patientProblem.patientInstanceId, patientId))
-      .all()
+    listPatientProblems(db, patientId)
+      .filter((row) => row.resolvedOnDay === null)
       .map((r) => r.problemId),
   );
+}
+
+/**
+ * When each of a case's expected problems joins the problem list.
+ *
+ * The admitting problem is there from day one; the rest of the expected list
+ * arrives a day at a time, in the order the case authored. That is a pacing
+ * rule, not a clinical claim — every problem, its assessment and its plan
+ * options are authored content, and this only decides which day they surface
+ * so that a new diagnosis can appear mid-admission with its management still
+ * to be chosen.
+ *
+ * Cases that want explicit control over the day are the natural next step; this
+ * is the schedule used until one says otherwise.
+ */
+export function emergenceSchedule(
+  problems: readonly t.CaseProblemRow[],
+): Map<string, number> {
+  const expected = problems.filter((p) => p.isExpected);
+  const primaries = expected.filter((p) => p.isPrimary);
+  const rest = expected.filter((p) => !p.isPrimary);
+
+  // A case with no problem flagged primary admits on its first expected one.
+  const onAdmission = primaries.length > 0 ? primaries : rest.slice(0, 1);
+  const later = primaries.length > 0 ? rest : rest.slice(1);
+
+  const schedule = new Map<string, number>();
+  for (const problem of onAdmission) schedule.set(problem.id, 1);
+  later.forEach((problem, index) => schedule.set(problem.id, index + 2));
+  return schedule;
+}
+
+/**
+ * Puts every problem that has emerged by `hospitalDay` on the patient's list.
+ *
+ * The diagnosis is given; the management is not. That is the point — the
+ * learner's work on a new problem is choosing what to do about it, which is
+ * the part worth practising.
+ *
+ * Idempotent, and it never revives a problem: a row exists for anything that
+ * has ever been on the list, resolved or not, so nothing is added twice.
+ */
+export function syncEmergedProblems(
+  db: Db,
+  patientId: string,
+  caseId: string,
+  hospitalDay: number,
+): string[] {
+  const problems = listCaseProblems(db, caseId);
+  const schedule = emergenceSchedule(problems);
+  const known = new Set(listPatientProblems(db, patientId).map((r) => r.problemId));
+
+  const added: string[] = [];
+  for (const problem of problems) {
+    const day = schedule.get(problem.id);
+    if (day === undefined || day > hospitalDay || known.has(problem.id)) continue;
+    db.insert(t.patientProblem)
+      .values({
+        patientInstanceId: patientId,
+        problemId: problem.id,
+        addedAt: nowIso(),
+        addedOnDay: day,
+      })
+      .onConflictDoNothing()
+      .run();
+    added.push(problem.id);
+  }
+  return added;
+}
+
+/** Takes a problem off the active list, keeping it in the hospital course. */
+export function resolveProblem(
+  db: Db,
+  patientId: string,
+  problemId: string,
+  hospitalDay: number,
+): void {
+  db.update(t.patientProblem)
+    .set({ resolvedOnDay: hospitalDay })
+    .where(
+      and(
+        eq(t.patientProblem.patientInstanceId, patientId),
+        eq(t.patientProblem.problemId, problemId),
+      ),
+    )
+    .run();
 }
 
 export function listSelectedOptionIds(db: Db, patientId: string): Set<string> {
@@ -81,6 +177,7 @@ export function listSelectedOptionIds(db: Db, patientId: string): Set<string> {
 export function buildChart(db: Db, patientId: string, caseId: string): ProblemView[] {
   const added = listAddedProblemIds(db, patientId);
   const selected = listSelectedOptionIds(db, patientId);
+  const rows = new Map(listPatientProblems(db, patientId).map((r) => [r.problemId, r]));
 
   return listCaseProblems(db, caseId).map((problem) => ({
     id: problem.id,
@@ -89,6 +186,8 @@ export function buildChart(db: Db, patientId: string, caseId: string): ProblemVi
     isPrimary: problem.isPrimary,
     isExpected: problem.isExpected,
     added: added.has(problem.id),
+    addedOnDay: rows.get(problem.id)?.addedOnDay ?? null,
+    resolvedOnDay: rows.get(problem.id)?.resolvedOnDay ?? null,
     options: listProblemOptions(db, problem.id).map((option) => ({
       id: option.id,
       label: option.label,
@@ -192,9 +291,8 @@ function readSnapshot(row: t.StudyEventRow): PlanSnapshot | null {
  * is generated, inferred, or filled in — a problem with no finalised plan
  * simply shows no plan.
  *
- * "Resolved" is not a separate flag anywhere: it is a problem that was on a
- * signed plan and is no longer on the active list, which is exactly what
- * taking a problem off the list means.
+ * A resolved problem keeps its last plan and moves to the resolved list rather
+ * than vanishing: it was real, and the course is the record of the admission.
  */
 export function buildHospitalCourse(
   db: Db,
@@ -202,6 +300,7 @@ export function buildHospitalCourse(
   caseId: string,
 ): HospitalCourse {
   const problems = new Map(listCaseProblems(db, caseId).map((p) => [p.id, p]));
+  const rows = new Map(listPatientProblems(db, patientId).map((r) => [r.problemId, r]));
   const added = listAddedProblemIds(db, patientId);
 
   const signings = db
@@ -251,7 +350,24 @@ export function buildHospitalCourse(
     );
   }
 
-  const resolved = [...finalised.values()].filter((p) => !added.has(p.problemId));
+  // Anything the learner has resolved, whether or not a plan was ever signed
+  // for it, so the course does not quietly lose a problem that existed.
+  const resolved: CourseProblem[] = [];
+  for (const row of rows.values()) {
+    if (row.resolvedOnDay === null) continue;
+    const problem = problems.get(row.problemId);
+    resolved.push(
+      finalised.get(row.problemId) ?? {
+        problemId: row.problemId,
+        label: problem?.label ?? row.problemId,
+        assessmentText: problem?.assessmentText ?? "",
+        isPrimary: problem?.isPrimary ?? false,
+        planItems: [],
+        hospitalDay: row.addedOnDay,
+        signedOn: null,
+      },
+    );
+  }
 
   return { active, resolved };
 }
