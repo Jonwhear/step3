@@ -176,7 +176,17 @@ export function PromptCard({
             >
               {continueLabel}
             </button>
-          ) : null}
+          ) : (
+            // Where answering is the end of it, the button stays as a spent
+            // control: a section whose button vanished reads as unfinished.
+            <button
+              type="button"
+              disabled
+              className="h-12 w-full cursor-default rounded-lg border border-ink-200 bg-surface-muted text-sm font-semibold text-ink-500"
+            >
+              ✓ Answered
+            </button>
+          )}
         </div>
       )}
     </Card>

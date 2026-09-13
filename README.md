@@ -64,7 +64,7 @@ Implemented:
 | Adjustable spaced-repetition intervals | ✅ |
 | 20 synthetic cases, 20 synthetic lectures, 101 concepts, 94 actions, 49 lab definitions, 24 learning points | ✅ |
 | Demo content delete / reset | ✅ |
-| Automated tests (254) | ✅ |
+| Automated tests (256) | ✅ |
 
 Deliberately **not** built (spec non-goals): authentication, multiplayer,
 cloud sync, leaderboards, streaks, billing, native apps, LLM grading,
@@ -627,11 +627,26 @@ One patient, one page, in the order a real encounter happens:
 ```
 TODAY'S ROUNDS      the clinical question, before any data is interpreted
 CURRENT DATA        vitals, labs, imaging, history and exam as they stand today
+DISCHARGE           when the case engine has made the patient eligible
 ▸ Previous performance
 
 NOTE (its own tab)  the problem list, and the management under each
                     signing it ends the patient's day
 ```
+
+Every clinical question lives on Rounds, the discharge one included. The note is
+where decisions are written down, not where they are asked.
+
+**A finished section says so.** When answering is the end of it the Submit
+button stays as a spent control reading "✓ Answered", and a signed note keeps a
+disabled "✓ Note signed" in the same place. A section whose button simply
+vanished reads as unfinished.
+
+**A signed note stays readable and correctable.** It is the day's record, so it
+is still there on the Note tab, read-only under a line saying it has been
+signed. "Amend note" unlocks it for the learner who read the grading and wants
+to fix something; re-signing replaces the note on file and does not spend a
+second round.
 
 `components/emr/RoundsEncounter` renders that for both the patient chart's
 Rounds tab and the service-wide walker at `/rounds`; `domain/rounds` assembles
@@ -972,7 +987,7 @@ Modelled and documented, with the hard part already done:
 npm test
 ```
 
-254 tests across 18 files. Every test runs against a real in-memory SQLite
+256 tests across 18 files. Every test runs against a real in-memory SQLite
 database with the real migrations and the real demo content — there are no
 mocks of the domain layer.
 
@@ -992,7 +1007,7 @@ mocks of the domain layer.
   real database close/reopen; hospital-day counting; progress counts; demo
   deletion leaving the profile and rotations intact.
 
-**V2 suites (189 tests):**
+**V2 suites (191 tests):**
 
 - `tests/audioMachine.test.ts` — the regression tests for the autoplay bug. The
   machine emits no speak effect without an explicit action; Play from stopped

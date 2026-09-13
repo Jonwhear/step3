@@ -364,6 +364,33 @@ describe("what the chart offers", () => {
     expect(labels).not.toContain("chart:");
   });
 
+  it("keeps questions out of the note section", () => {
+    const page = readFileSync("src/app/patients/[id]/page.tsx", "utf8");
+    const noteTab = page.slice(page.indexOf("{/* -------------------------------- note"));
+    // The discharge question is a clinical decision, so it belongs with the
+    // other one on Rounds, not in the middle of the day's note.
+    expect(noteTab).not.toContain("DischargeFlow");
+    expect(noteTab).toContain("<DailyNote");
+
+    const roundsTab = page.slice(
+      page.indexOf("{/* ------------------------------- rounds"),
+      page.indexOf("{/* -------------------------------- note"),
+    );
+    expect(roundsTab).toContain("DischargeFlow");
+    // …and rounds no longer carries a card pointing at a tab in the header.
+    expect(roundsTab).not.toContain("Open the note");
+  });
+
+  it("describes a signed note as a note, and lets it be amended", () => {
+    const note = readFileSync("src/components/emr/DailyNote.tsx", "utf8");
+    // "Rounds complete" belongs on Rounds; this tab talks about the note.
+    expect(note).not.toContain("rounds complete for hospital day");
+    expect(note).toContain("This note has been signed for hospital day");
+    // A signed note is still readable, and correctable.
+    expect(note).toContain("Amend note");
+    expect(note).toContain("✓ Note signed");
+  });
+
   it("collapses concepts and hides the teaching point until asked for", () => {
     const page = readFileSync("src/app/patients/[id]/page.tsx", "utf8");
     // Concepts are inside a Disclosure rather than an always-open card.

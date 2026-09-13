@@ -260,22 +260,27 @@ export default async function PatientPage({
               dischargeEligible={encounter.dischargeEligible}
               showReferenceRanges={prefs.labs.showReferenceRanges}
               audio={getAudioPreferences(database)}
+              discharge={
+                encounter.dischargeEligible ? (
+                  <DischargeFlow
+                    patientId={patient.id}
+                    patientName={patient.patientName}
+                    prompt={
+                      dischargePrompt
+                        ? {
+                            id: dischargePrompt.id,
+                            promptText: dischargePrompt.promptText,
+                            responseType: dischargePrompt.responseType,
+                            choices: promptChoices(dischargePrompt),
+                            allowsFreeText: dischargePrompt.responseType === "SHORT_TEXT",
+                          }
+                        : null
+                    }
+                    audio={getAudioPreferences(database)}
+                  />
+                ) : null
+              }
             />
-            {encounter.problems.length > 0 && encounter.status === "DUE" ? (
-              <Card className="mt-5 p-4">
-                <p className="text-sm text-ink-600">
-                  {encounter.noteSignedToday
-                    ? "Today's note is signed."
-                    : "Write and sign today's note to finish with this patient."}
-                </p>
-                <Link
-                  href={`/patients/${patient.id}?tab=note`}
-                  className="mt-2 inline-flex h-10 items-center rounded-lg bg-clinical-600 px-4 text-sm font-semibold text-white"
-                >
-                  Open the note ›
-                </Link>
-              </Card>
-            ) : null}
           </div>
         ) : null}
 
@@ -292,24 +297,6 @@ export default async function PatientPage({
               problems={noteProblems}
               signedToday={encounter.noteSignedToday}
             />
-            {encounter.dischargeEligible ? (
-              <DischargeFlow
-                patientId={patient.id}
-                patientName={patient.patientName}
-                prompt={
-                  dischargePrompt
-                    ? {
-                        id: dischargePrompt.id,
-                        promptText: dischargePrompt.promptText,
-                        responseType: dischargePrompt.responseType,
-                        choices: promptChoices(dischargePrompt),
-                        allowsFreeText: dischargePrompt.responseType === "SHORT_TEXT",
-                      }
-                    : null
-                }
-                audio={getAudioPreferences(database)}
-              />
-            ) : null}
           </div>
         ) : null}
 
