@@ -1,0 +1,7 @@
+{
+  "fixture": "q001_patient_safety",
+  "why_representative": "A safety question with little or no patient. Checks that `patient` may be null or sparse and that DecisionType.PATIENT_SAFETY is reachable.",
+  "expected_question_kind": "PATIENT_SAFETY / ETHICS_SYSTEMS",
+  "source_text": "not committed \u2014 place the segmented question at source.txt",
+  "expected_extraction": "not written \u2014 to be filled from a real run, then reviewed"
+}

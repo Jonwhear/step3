@@ -1,0 +1,6 @@
+# Extraction pipeline dependencies.
+#
+# Deliberately short. Nothing here talks to a model yet: v0 is the schema and
+# its tests, so the only runtime dependency is the validator itself.
+pydantic>=2.9
+pytest>=8.0

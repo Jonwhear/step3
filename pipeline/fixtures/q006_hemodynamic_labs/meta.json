@@ -1,0 +1,7 @@
+{
+  "fixture": "q006_hemodynamic_labs",
+  "why_representative": "Dense vitals and laboratory values. The stress test for `measurement`: every discrete value must survive as label/value/unit rather than prose.",
+  "expected_question_kind": "CLINICAL_CASE",
+  "source_text": "not committed \u2014 place the segmented question at source.txt",
+  "expected_extraction": "not written \u2014 to be filled from a real run, then reviewed"
+}

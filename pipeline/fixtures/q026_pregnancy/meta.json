@@ -1,0 +1,7 @@
+{
+  "fixture": "q026_pregnancy",
+  "why_representative": "Pregnancy with a gestational age. Checks PregnancyContext and that gestational age is not confused with patient age.",
+  "expected_question_kind": "CLINICAL_CASE",
+  "source_text": "not committed \u2014 place the segmented question at source.txt",
+  "expected_extraction": "not written \u2014 to be filled from a real run, then reviewed"
+}

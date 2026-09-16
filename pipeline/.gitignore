@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Source question text is never committed. The app's own rule (README §71) is
+# that copyrighted external material is not stored in the repository; these
+# files stay on the machine that owns the licence.
+fixtures/**/source.txt
+fixtures/**/segmented.json
+fixtures/**/*.ocr.txt

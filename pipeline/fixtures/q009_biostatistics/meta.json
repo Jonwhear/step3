@@ -1,0 +1,7 @@
+{
+  "fixture": "q009_biostatistics",
+  "why_representative": "No patient at all. Checks that `patient` is null, `phase_of_care` is null and the decision still carries evidence.",
+  "expected_question_kind": "BIOSTATS_RESEARCH",
+  "source_text": "not committed \u2014 place the segmented question at source.txt",
+  "expected_extraction": "not written \u2014 to be filled from a real run, then reviewed"
+}

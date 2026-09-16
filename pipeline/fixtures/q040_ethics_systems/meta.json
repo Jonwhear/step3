@@ -1,0 +1,7 @@
+{
+  "fixture": "q040_ethics_systems",
+  "why_representative": "Ethics or systems reasoning. Checks DecisionType.ETHICS, a null phase of care, and learning points that are rules rather than clinical facts.",
+  "expected_question_kind": "ETHICS_SYSTEMS",
+  "source_text": "not committed \u2014 place the segmented question at source.txt",
+  "expected_extraction": "not written \u2014 to be filled from a real run, then reviewed"
+}
